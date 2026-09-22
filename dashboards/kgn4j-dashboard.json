@@ -1,0 +1,191 @@
+{
+  "title": "KGN4j - Pathao Pay drill-down",
+  "version": "2.4",
+  "settings": {
+    "pagenumber": 0,
+    "editable": true,
+    "fullscreenEnabled": false,
+    "parameters": {
+      "neodash_focus": "root"
+    },
+    "downloadImageEnabled": true,
+    "theme": "light"
+  },
+  "pages": [
+    {
+      "title": "Pathao Pay",
+      "reports": [
+        {
+          "id": "kgn4j-breadcrumb",
+          "title": "Where am I",
+          "query": "// CARD - \"Where am I\" (report type: Table, single row)\n// The breadcrumb from Pathao Pay down to the node currently in focus,\n// plus the filter the transactions table is currently applying - so it\n// is always visible why the dataframe holds the rows it holds.\n// Falls back to 'root' when the focus parameter points at a key that no\n// longer exists - see the note in card2_expansion_graph.cypher.\nWITH coalesce($neodash_focus, 'root') AS fk\nOPTIONAL MATCH (stale:Nav {key: fk})\nWITH CASE WHEN stale IS NULL THEN 'root' ELSE fk END AS fk\nMATCH (f:Nav {key: fk})\nMATCH (n:Nav) WHERE f.path STARTS WITH n.path\nWITH f, n ORDER BY n.level\nWITH f, collect(n.name) AS trail\nWITH f, trail,\n     [x IN [\n       CASE WHEN f.f_acc  IS NOT NULL THEN 'STATEMENT_FOR_ACC = ' + f.f_acc  ELSE null END,\n       CASE WHEN f.f_dc   IS NOT NULL THEN 'TXN_TYPE_D_C = '      + f.f_dc   ELSE null END,\n       CASE WHEN f.f_type IS NOT NULL THEN 'TXN_TYPE = '          + f.f_type ELSE null END,\n       CASE WHEN f.f_cp   IS NOT NULL THEN 'TXN_WITH_ACC = '      + f.f_cp   ELSE null END\n     ] WHERE x IS NOT NULL] AS filters\nRETURN f.level AS LEVEL,\n       f.name  AS FOCUS,\n       reduce(s = '', x IN trail   | CASE WHEN s = '' THEN x ELSE s + '  >  '   + x END) AS BREADCRUMB,\n       CASE WHEN size(filters) = 0 THEN 'all rows (sampled)'\n            ELSE reduce(s = '', x IN filters | CASE WHEN s = '' THEN x ELSE s + '  AND  ' + x END)\n       END AS TABLE_FILTER,\n       CASE WHEN f.click = 'root' AND f.key <> 'root'\n            THEN 'end of branch - click to restart' ELSE '' END AS NOTE\n",
+          "width": 12,
+          "height": 3,
+          "x": 0,
+          "y": 0,
+          "type": "table",
+          "selection": {},
+          "settings": {
+            "compact": true,
+            "description": "Path from Pathao Pay to the node in focus, and the filter the table is applying."
+          },
+          "schema": []
+        },
+        {
+          "id": "kgn4j-graph",
+          "title": "Pathao Pay drill-down",
+          "query": "// CARD - \"Pathao Pay drill-down\" (report type: Graph)\n//\n// Parameter: $neodash_focus, set by clicking any node (property `click`).\n// Unset  -> defaults to 'root', so the card opens on the Pathao Pay node.\n//\n// Reveal rule: show the focus node, its ancestors (the breadcrumb back\n// to Pathao Pay) and its direct children. One click = one level deeper:\n//\n//   Pathao Pay -> Customers -> C1..Cn -> Customer-<acc> -> TXN_TYPE_D_C\n//     -> Credit -> P2P / TOP UP / CASH OUT / ... -> Customer-<acc> + END\n//     -> Debit  -> TXN_TYPE -> P2P / TOP UP / ...  -> Customer-<acc> + END\n//\n// The level-10 fan-out stops once the counterparty amounts balance the\n// transaction type's total; the END node marks that point. Clicking END\n// sets focus back to 'root' because its `click` property holds 'root' -\n// which is the cycle.\n//\n// STALE FOCUS. NeoDash keeps `neodash_focus` in browser localStorage, so\n// it survives a rebuild of the tree. Rebuilding renames keys, and a\n// focus pointing at a key that no longer exists would match nothing and\n// draw an EMPTY CARD with no error - which looks exactly like a broken\n// dashboard. The OPTIONAL MATCH below falls back to 'root' in that case,\n// so a stale parameter costs you the drill-down position and nothing else.\n// PAGING AT LEVEL 2. All 38 customer pages hang off the root, but only\n// page 1 is revealed automatically - otherwise Pathao Pay would fan out\n// into 38 near-identical nodes. Pages 2+ are reached only by clicking\n// the page node, whose `click` points at the next page, so the level\n// behaves like one node cycling through tens rather than a fan-out.\nWITH coalesce($neodash_focus, 'root') AS fk\nOPTIONAL MATCH (stale:Nav {key: fk})\nWITH CASE WHEN stale IS NULL THEN 'root' ELSE fk END AS fk\nMATCH (f:Nav {key: fk})\nMATCH (n:Nav)\nWHERE f.path STARTS WITH n.path      // ancestors of the focus, and the focus itself\n   OR (n.parent_key = f.key          // the focus node's direct children ...\n       AND (NOT n:CustomerPage OR n.page = 1))   // ... but only page 1 of them\nWITH collect(DISTINCT n) AS shown\nUNWIND shown AS a\nMATCH p = (a)-[:EXPANDS]->(b)\nWHERE b IN shown\nRETURN p\n",
+          "width": 7,
+          "height": 7,
+          "x": 0,
+          "y": 3,
+          "type": "graph",
+          "selection": {
+            "Provider": "name",
+            "CustomerPage": "name",
+            "Customer": "name",
+            "CustomerAcc": "name",
+            "TxnTypeDC": "name",
+            "CreditNode": "name",
+            "DebitNode": "name",
+            "TxnTypeHub": "name",
+            "TxnTypeNode": "name",
+            "CounterpartyNode": "name",
+            "OthersNode": "name",
+            "EndNode": "name",
+            "EXPANDS": "name"
+          },
+          "settings": {
+            "layout": "force-directed",
+            "nodeColorScheme": "neodash",
+            "nodeLabelFontSize": 3.2,
+            "relLabelFontSize": 3.0,
+            "showPropertiesOnHover": true,
+            "showPropertiesOnClick": true,
+            "fixNodeAfterDrag": false,
+            "lockable": true,
+            "description": "One click = one level. The counterparty fan-out stops once the amounts balance; click END to return to Pathao Pay.",
+            "actionsRules": [
+              {
+                "condition": "onNodeClick",
+                "field": "Provider",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "CustomerPage",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "Customer",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "CustomerAcc",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "TxnTypeDC",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "CreditNode",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "DebitNode",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "TxnTypeHub",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "TxnTypeNode",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "CounterpartyNode",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "OthersNode",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "EndNode",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              }
+            ],
+            "enableExploration": false,
+            "enableEditing": false,
+            "defaultNodeSize": 3,
+            "defaultRelWidth": 1.6
+          },
+          "schema": []
+        },
+        {
+          "id": "kgn4j-transactions",
+          "title": "Transactions",
+          "query": "// CARD - \"Transactions\" (report type: Table)\n// Every column of the source table, exactly as supplied.\n//\n// DYNAMIC: the table follows whichever node is selected in the graph.\n// Each Nav node carries four filter properties written by\n// cypher/03_build_nav_graph.cypher, and this card applies whichever of\n// them are set:\n//\n//   f_acc   STATEMENT_FOR_ACC  - set from the C1..Cn level downwards\n//   f_dc    TXN_TYPE_D_C       - set from Credit / Debit downwards\n//   f_type  TXN_TYPE           - set on P2P / TOP UP / CASH OUT / ...\n//   f_cp    TXN_WITH_ACC       - set on the level-10 Customer-<acc> nodes\n//\n// So: Pathao Pay or Customers -> everything (sampled); C3 -> that\n// customer's rows; Debit -> only their debits; CASH OUT -> only their\n// cash-out debits; Customer-1728... -> only the rows between the two.\n//\n// The LIMIT matters: with millions of rows loaded, an unbounded table\n// card will hang the browser. Raise it if you want - the browser, not\n// Neo4j, is what struggles first.\n// A focus key that no longer exists (after a rebuild renames keys) leaves\n// every filter null, which shows the unfiltered sample - the same thing\n// 'root' shows. See the note in card2_expansion_graph.cypher.\nWITH coalesce($neodash_focus, 'root') AS fk\nOPTIONAL MATCH (f:Nav {key: fk})\nWITH f.f_acc AS f_acc, f.f_dc AS f_dc, f.f_type AS f_type, f.f_cp AS f_cp\nMATCH (t:Transaction)\nWHERE (f_acc  IS NULL OR t.stmt_acc     = f_acc)\n  AND (f_dc   IS NULL OR t.txn_type_d_c = f_dc)\n  AND (f_type IS NULL OR t.txn_type     = f_type)\n  AND (f_cp   IS NULL OR t.with_acc     = f_cp)\nRETURN t.unq_id        AS UNQ_ID,\n       t.from_date     AS FROM_DATE,\n       t.to_date       AS TO_DATE,\n       t.serial_no     AS SerialNo,\n       t.txn_date_time AS TXN_DATE_TIME,\n       t.txn_id        AS TXN_ID,\n       t.txn_type      AS TXN_TYPE,\n       t.account_type  AS ACCOUNT_TYPE,\n       t.stmt_acc      AS STATEMENT_FOR_ACC,\n       t.with_acc      AS TXN_WITH_ACC,\n       t.channel       AS CHANNEL,\n       t.reference     AS REFERENCE,\n       t.txn_type_d_c  AS TXN_TYPE_D_C,\n       t.status        AS STATUS,\n       t.amount        AS TXN_AMT,\n       t.balance_after AS AVAILABLE_BLC_AFTER_TXN,\n       t.txn_with_info AS TXN_WITH_INFO\nORDER BY STATEMENT_FOR_ACC, TXN_DATE_TIME, SerialNo\nLIMIT 2000\n",
+          "width": 5,
+          "height": 7,
+          "x": 7,
+          "y": 3,
+          "type": "table",
+          "selection": {},
+          "settings": {
+            "compact": true,
+            "allowDownload": true,
+            "description": "All 17 source columns. Follows the selected node: customer, debit/credit, transaction type and counterparty."
+          },
+          "schema": []
+        }
+      ]
+    }
+  ],
+  "parameters": {
+    "neodash_focus": "root"
+  },
+  "extensions": {
+    "active": true,
+    "activeReducers": [],
+    "actions": {
+      "active": true
+    }
+  }
+}

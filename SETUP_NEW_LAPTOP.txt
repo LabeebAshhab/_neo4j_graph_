@@ -1,0 +1,415 @@
+===============================================================================
+KGN4j - SETTING UP ON ANOTHER LAPTOP
+===============================================================================
+
+Assumes pgAdmin, PostgreSQL, Neo4j, Node.js and NeoDash are already
+installed on that laptop.
+
+Six steps, roughly 30-60 minutes, most of it the CSV load.
+
+Work top to bottom. Every step ends with a number to check. If a number
+is wrong, STOP THERE - everything after it will be empty.
+
+
+===============================================================================
+PART A - DO THIS ON THE OLD LAPTOP FIRST
+===============================================================================
+
+Two things do not travel with a clone.
+
+
+A1. THE REPO HAS NO COMMITS YET
+-------------------------------------------------------------------------------
+There is nothing to clone until you commit. Check with:
+
+    git log
+
+If it says "does not have any commits yet", first delete the eight
+0-byte junk files in the project root. They are accidental artifacts of
+a shell that mis-parsed a ":param" line, all empty:
+
+    cd C:\Nagad.work\KGN4j
+    rm -f "'credit" "'dc" "'debit" "'debittotal" "'root'" "'ud" "'user" "'users'"
+
+Then commit:
+
+    cd C:\Nagad.work\KGN4j
+    git add -A
+    git commit -m "KGN4j pipeline"
+
+Push it somewhere, or just copy the whole folder to the other laptop.
+
+
+A2. THE DATA IS NOT IN THE REPO
+-------------------------------------------------------------------------------
+.gitignore excludes data/*.csv, and the source is about 1 GB anyway.
+Only data/sample_transactions.csv (17 rows, same 17 columns) is
+committed - enough to prove the pipeline works, but not your real data.
+
+You move the real rows yourself. See step 1.
+
+
+===============================================================================
+WHAT YOU DO NOT NEED
+===============================================================================
+
+Worth saying up front, because README.md and docs/RUNBOOK.md in this
+repo still list these as prerequisites. They are wrong on this point.
+
+    NOT NEEDED                    WHY
+    ---------------------------   ------------------------------------------
+    APOC                          The pipeline uses LOAD CSV and
+                                  CALL { } IN TRANSACTIONS, both core
+                                  Cypher. APOC appears in 02b only
+                                  inside a comment.
+
+    PostgreSQL JDBC driver        Only cypher/02_load_from_postgres.cypher
+                                  used it, and the CSV path superseded
+                                  that file.
+
+    config/apoc.conf              Same reason.
+
+If Neo4j starts and LOAD CSV works, you have everything.
+
+
+===============================================================================
+STEP 0 - WRITE DOWN YOUR THREE VALUES
+===============================================================================
+
+These are the only machine-specific things. Every command below refers
+to them.
+
+    WHAT                          ON THE OLD LAPTOP
+    ---------------------------   ------------------------------------------
+    NEO4J_HOME                    C:\neo4j\neo4j-community-2026.08.1
+    Neo4j password                1234abcD
+    PostgreSQL database / table   database "neo4j", table "public.neo4j"
+
+NEO4J_HOME is the folder that contains bin\neo4j.bat.
+
+If your PostgreSQL table is not public.neo4j, edit the three references
+in sql\01_view.sql (lines 84 and 105, plus the header comment) before
+running it in step 3.
+
+
+===============================================================================
+STEP 1 - GET THE TRANSACTIONS INTO POSTGRESQL
+===============================================================================
+
+Pick ONE option. Both end with the rows in a table the views can read.
+
+
+OPTION A - you still have the source CSV (simplest)
+-------------------------------------------------------------------------------
+In pgAdmin on the NEW laptop:
+
+  1. Create a database named:  neo4j
+
+  2. Create the table. The 17 columns, in file order:
+
+         UNQ_ID
+         FROM_DATE
+         TO_DATE
+         SerialNo
+         TXN_DATE_TIME
+         TXN_ID
+         TXN_TYPE
+         ACCOUNT_TYPE
+         STATEMENT_FOR_ACC
+         TXN_WITH_ACC
+         CHANNEL
+         REFERENCE
+         TXN_TYPE_D_C
+         STATUS
+         TXN_AMT
+         AVAILABLE_BLC_AFTER_TXN
+         TXN_WITH_INFO
+
+     Type "text" for all of them is fine. sql\01_view.sql casts what it
+     needs and never parses dates.
+
+  3. Right-click the table -> Import/Export Data -> Import
+         Header:     Yes
+         Delimiter:  ,
+         Encoding:   UTF8
+
+
+OPTION B - copy the table straight across (faster, exact)
+-------------------------------------------------------------------------------
+On the OLD laptop:
+
+    "C:\Program Files\PostgreSQL\18\bin\pg_dump.exe" -U postgres -d neo4j -t public.neo4j -Fc -f kgn4j_table.dump
+
+Copy kgn4j_table.dump to the new laptop. Create an empty database named
+"neo4j" there, then:
+
+    "C:\Program Files\PostgreSQL\18\bin\pg_restore.exe" -U postgres -d neo4j -t neo4j kgn4j_table.dump
+
+Both prompt for the PostgreSQL password. Type it yourself - it is not
+stored anywhere in the repo.
+
+
+CHECK BEFORE MOVING ON  (pgAdmin Query Tool)
+-------------------------------------------------------------------------------
+    SELECT count(*) FROM public.neo4j;
+
+Expect your full row count (6,746,792 on the old laptop).
+If it is 0, STOP.
+
+
+===============================================================================
+STEP 2 - CONFIGURE NEO4J
+===============================================================================
+
+Open this file:
+
+    <NEO4J_HOME>\conf\neo4j.conf
+
+Make sure these lines are present and NOT commented out:
+
+    server.directories.import=import
+    server.bolt.enabled=true
+    server.http.enabled=true
+
+    server.memory.heap.initial_size=4g
+    server.memory.heap.max_size=4g
+    server.memory.pagecache.size=6g
+
+The memory lines are what make a multi-million-row load finish instead
+of thrashing. Those values assume 16 GB RAM.
+
+    RAM      heap     pagecache
+    ------   ------   ---------
+    16 GB    4g       6g
+     8 GB    2g       2g
+
+Leave at least 4 GB for the operating system.
+
+Neo4j reads its config at startup only - restart it after editing.
+
+Now start Neo4j:
+
+    "<NEO4J_HOME>\bin\neo4j.bat" console
+
+Leave that window open. On first start Neo4j forces a password change
+from the default neo4j/neo4j. Open http://localhost:7474 and set it to
+whatever you recorded in step 0.
+
+CHECK: http://localhost:7474 loads and you can log in.
+
+
+===============================================================================
+STEP 3 - CREATE THE TWO VIEWS
+===============================================================================
+
+pgAdmin -> Query Tool, CONNECTED TO THE "neo4j" DATABASE.
+
+Check the tab header. This is the single easiest thing to get wrong.
+
+Open and run this file (F5):
+
+    sql\01_view.sql
+
+It creates v_txn_for_graph and v_account_summary. It changes nothing
+about your table and is safe to re-run.
+
+CHECK: it ends by printing two numbers:
+
+    base_table_rows   view_rows
+    6746792           6746792
+
+Both must be roughly your row count.
+IF view_rows IS 0, STOP. Every later step would produce an empty graph.
+
+
+===============================================================================
+STEP 4 - EXPORT BOTH VIEWS INTO NEO4J'S IMPORT FOLDER
+===============================================================================
+
+Neo4j reads CSVs only from its own import directory.
+
+Run both of these in pgAdmin. Replace the path with your NEO4J_HOME.
+
+DO NOT ADD "ORDER BY" - sorting millions of rows costs minutes and
+nothing downstream needs it.
+
+    COPY (SELECT * FROM public.v_txn_for_graph)
+    TO 'C:\neo4j\neo4j-community-2026.08.1\import\txn_for_graph.csv'
+    WITH (FORMAT csv, HEADER true);
+
+    COPY (SELECT * FROM public.v_account_summary)
+    TO 'C:\neo4j\neo4j-community-2026.08.1\import\account_summary.csv'
+    WITH (FORMAT csv, HEADER true);
+
+CHECK: each prints a row count. Expect about:
+
+    COPY 6746792
+    COPY 380
+
+IF THE FIRST PRINTS "COPY 0", STOP.
+
+The first file will be around 1 GB.
+
+
+IF COPY FAILS
+-------------------------------------------------------------------------------
+"permission denied" - COPY writes server-side, so the PostgreSQL service
+account needs write permission on <NEO4J_HOME>\import. Either grant
+"Authenticated Users" Modify on that folder, or run the SELECT without
+the TO clause, use pgAdmin's "Download as CSV" (F8), and move the file:
+
+    mv ~/Downloads/data-*.csv "/c/neo4j/neo4j-community-2026.08.1/import/txn_for_graph.csv"
+
+"must be superuser" - connect as the postgres user.
+
+
+===============================================================================
+STEP 5 - BUILD THE GRAPH
+===============================================================================
+
+Four files, IN THIS ORDER. One command each, run from the project
+folder. Replace <NEO4J_HOME> and YOUR_PASSWORD.
+
+  1.  "<NEO4J_HOME>\bin\cypher-shell.bat" -a bolt://localhost:7687 -u neo4j -p YOUR_PASSWORD -d neo4j --file cypher/01_constraints.cypher
+
+  2.  "<NEO4J_HOME>\bin\cypher-shell.bat" -a bolt://localhost:7687 -u neo4j -p YOUR_PASSWORD -d neo4j --file cypher/02b_load_from_csv.cypher
+
+  3.  "<NEO4J_HOME>\bin\cypher-shell.bat" -a bolt://localhost:7687 -u neo4j -p YOUR_PASSWORD -d neo4j --file cypher/03_build_nav_graph.cypher
+
+  4.  "<NEO4J_HOME>\bin\cypher-shell.bat" -a bolt://localhost:7687 -u neo4j -p YOUR_PASSWORD -d neo4j --file cypher/04_verify.cypher
+
+
+    FILE                   WHAT IT DOES                        TIME
+    --------------------   ---------------------------------   ----------
+    01_constraints         constraints + indexes               seconds
+    02b_load_from_csv      both CSVs -> Account / Transaction  10-30 min
+    03_build_nav_graph     the Pathao Pay drill-down tree      about 2 min
+    04_verify              the checks                          about 1 min
+
+ORDER MATTERS. 01_constraints MUST run first, or every MERGE in 02b
+degrades to a full scan and the load takes hours instead of minutes.
+
+WARNING: 02b begins with "MATCH (n) DETACH DELETE n" - it wipes the
+neo4j database first. That is intended and re-runnable, but know it
+before pointing this at a database holding anything else.
+
+PREFER A GUI? Open http://localhost:7474, log in, and paste each file's
+whole contents into the query bar in the same order. Neo4j Browser runs
+multi-statement scripts and supports the ":param" lines at the top of
+file 3.
+
+CHECK: file 3 ends by printing node counts per level. On the old
+laptop's data:
+
+    level  node_type            nodes
+    -----  ------------------   -----
+      1    Provider                 1
+      2    CustomerPage            38
+      3    Customer               380
+      4    CustomerAcc            380
+      5    TxnTypeDC              380
+      6    CreditNode             380
+      7    DebitNode              380
+      8    TxnTypeHub             380
+      9    TxnTypeNode           4939
+     10    CounterpartyNode     89546
+     10    EndNode               4939
+     10    OthersNode             469
+
+CHECK: 04_verify should print BALANCED throughout, and NO ROWS for the
+orphan, duplicate-path and paging checks. docs\RUNBOOK.md explains what
+each check means.
+
+
+===============================================================================
+STEP 6 - NEODASH
+===============================================================================
+
+    cd <project folder>
+    powershell -ExecutionPolicy Bypass -File scripts\setup-neodash.ps1
+
+That clones NeoDash into .\neodash if it is missing (it is git-ignored,
+so a fresh clone will not have it), runs npm install --legacy-peer-deps,
+and starts the dev server on http://localhost:3000.
+
+First compile takes 60-90 seconds. Until it finishes, the port accepts
+connections but returns nothing. That looks like a hang and is not one.
+
+Then in the browser at http://localhost:3000:
+
+  1. CONNECT
+         Protocol:   bolt://
+         Hostname:   localhost
+         Port:       7687
+         Database:   neo4j
+         Username:   neo4j
+         Password:   your password
+
+  2. LOAD THE DASHBOARD
+         Menu (top left) -> Load Dashboard -> Select from file
+         -> dashboards\kgn4j-dashboard.json -> Load
+
+  3. ENABLE CLICKS
+         Menu -> Extensions -> turn ON "Report Actions"
+
+     DO NOT SKIP 3. Without it the graph draws but no click does
+     anything, which looks exactly like a broken dashboard.
+
+
+===============================================================================
+RUNNING IT AGAIN LATER
+===============================================================================
+
+Nothing here is a Windows service. Both of these stop when their window
+closes or the machine reboots, and BOTH must be running for the
+dashboard to work.
+
+    Window 1 - Neo4j:
+
+        "<NEO4J_HOME>\bin\neo4j.bat" console
+
+    Window 2 - NeoDash:
+
+        cd <project folder>
+        powershell -ExecutionPolicy Bypass -File scripts\setup-neodash.ps1
+
+One window each, left open.
+
+The graph itself survives - it is stored on disk inside Neo4j. You only
+re-run step 5 when the source data changes.
+
+
+===============================================================================
+IF SOMETHING GOES WRONG
+===============================================================================
+
+    SYMPTOM                          CAUSE
+    ------------------------------   ----------------------------------------
+    view_rows is 0 in step 3         the table name in sql\01_view.sql does
+                                     not match yours
+
+    COPY 0 in step 4                 same
+
+    "Couldn't load the external      the CSVs are not in
+    resource" in step 5              <NEO4J_HOME>\import, or
+                                     server.directories.import was changed
+
+    02b runs out of heap             memory settings in step 2 not applied,
+                                     or Neo4j not restarted after editing
+                                     the conf file
+
+    graph card is empty              the tree was not built (step 5 file 3),
+                                     or a stale neodash_focus - reload the
+                                     dashboard JSON
+
+    clicks do nothing                Report Actions extension is off
+                                     (step 6.3)
+
+    graph will not drag              the lock button is on - top right of
+                                     the graph card
+
+    NeoDash will not connect         try neo4j:// instead of bolt://
+
+docs\TROUBLESHOOTING.md has the longer list.
+
+===============================================================================

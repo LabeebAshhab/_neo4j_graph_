@@ -1,0 +1,15 @@
+# =====================================================================
+# Copy this file to   <NEO4J_HOME>\conf\apoc.conf
+# (Neo4j Desktop:  ... > Open Folder > Configuration)
+# Restart Neo4j after editing.
+#
+# This is what gives  apoc.load.jdbc('pg', ...)  its connection.
+# =====================================================================
+
+apoc.jdbc.pg.url=jdbc:postgresql://localhost:5432/kgn4j?user=postgres&password=CHANGE_ME
+
+# If your password contains  & : / ? # @  characters, URL-encode them,
+# or use the alternative split form instead:
+# apoc.jdbc.pg.url=jdbc:postgresql://localhost:5432/kgn4j
+# apoc.jdbc.pg.user=postgres
+# apoc.jdbc.pg.password=CHANGE_ME

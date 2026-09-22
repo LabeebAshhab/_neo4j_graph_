@@ -1,0 +1,18 @@
+# =====================================================================
+# Append these lines to  <NEO4J_HOME>\conf\neo4j.conf
+# (uncomment/replace the existing versions of the same keys)
+# Neo4j 5.x key names.
+# =====================================================================
+
+dbms.security.procedures.unrestricted=apoc.*
+dbms.security.procedures.allowlist=apoc.*,gds.*
+
+# Bolt / HTTP - NeoDash connects over Bolt on 7687
+server.bolt.enabled=true
+server.bolt.listen_address=:7687
+server.http.enabled=true
+server.http.listen_address=:7474
+
+# Required so a browser app (NeoDash on http://localhost:3000) may talk
+# to the Bolt endpoint. Only needed if you see CORS / websocket errors.
+# server.unmanaged_extension_classes=

@@ -1,0 +1,13 @@
+# NeoDash is cloned locally, not vendored
+neodash/
+node_modules/
+
+# never commit real credentials
+config/apoc.conf
+.env
+
+# real statement extracts
+data/*.csv
+!data/sample_transactions.csv
+
+*.log
