@@ -53,7 +53,9 @@
             "CounterpartyNode": "name",
             "OthersNode": "name",
             "EndNode": "name",
-            "EXPANDS": "name"
+            "EXPANDS": "name",
+            "CounterpartyPage": "name",
+            "PageNav": "name"
           },
           "settings": {
             "layout": "force-directed",
@@ -146,6 +148,20 @@
               {
                 "condition": "onNodeClick",
                 "field": "EndNode",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "CounterpartyPage",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "PageNav",
                 "value": "click",
                 "customization": "set variable",
                 "customizationValue": "focus"

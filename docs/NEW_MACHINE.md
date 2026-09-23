@@ -6,6 +6,11 @@ there. Six steps, roughly 30-60 minutes, most of it the CSV load.
 Work top to bottom. Every step ends with a number to check — if a number is
 wrong, stop there, because everything after it will be empty.
 
+**Shell:** every command here is **PowerShell**. Where a command starts with a
+quoted path, the leading `&` is required — it is PowerShell's call operator.
+Without it PowerShell parses the quoted path as a string and fails with
+`Unexpected token '-a' in expression or statement.`
+
 ---
 
 ## Before you clone: two things that do NOT travel
@@ -138,7 +143,7 @@ Heap + pagecache should leave at least 4 GB for the OS.
 Then start Neo4j and set the password:
 
 ```bash
-"<NEO4J_HOME>\bin\neo4j.bat" console
+& "<NEO4J_HOME>\bin\neo4j.bat" console
 ```
 
 Leave that window open. On first start Neo4j forces a password change from the
@@ -210,19 +215,19 @@ If it fails with *must be superuser*, connect as `postgres`.
 Four files, **in this order**. From the project folder, one command each:
 
 ```bash
-"<NEO4J_HOME>\bin\cypher-shell.bat" -a bolt://localhost:7687 -u neo4j -p YOUR_PASSWORD -d neo4j --file cypher/01_constraints.cypher
+& "<NEO4J_HOME>\bin\cypher-shell.bat" -a bolt://localhost:7687 -u neo4j -p YOUR_PASSWORD -d neo4j --file cypher/01_constraints.cypher
 ```
 
 ```bash
-"<NEO4J_HOME>\bin\cypher-shell.bat" -a bolt://localhost:7687 -u neo4j -p YOUR_PASSWORD -d neo4j --file cypher/02b_load_from_csv.cypher
+& "<NEO4J_HOME>\bin\cypher-shell.bat" -a bolt://localhost:7687 -u neo4j -p YOUR_PASSWORD -d neo4j --file cypher/02b_load_from_csv.cypher
 ```
 
 ```bash
-"<NEO4J_HOME>\bin\cypher-shell.bat" -a bolt://localhost:7687 -u neo4j -p YOUR_PASSWORD -d neo4j --file cypher/03_build_nav_graph.cypher
+& "<NEO4J_HOME>\bin\cypher-shell.bat" -a bolt://localhost:7687 -u neo4j -p YOUR_PASSWORD -d neo4j --file cypher/03_build_nav_graph.cypher
 ```
 
 ```bash
-"<NEO4J_HOME>\bin\cypher-shell.bat" -a bolt://localhost:7687 -u neo4j -p YOUR_PASSWORD -d neo4j --file cypher/04_verify.cypher
+& "<NEO4J_HOME>\bin\cypher-shell.bat" -a bolt://localhost:7687 -u neo4j -p YOUR_PASSWORD -d neo4j --file cypher/04_verify.cypher
 ```
 
 | file | does | takes |
@@ -285,7 +290,7 @@ Nothing here is a Windows service. Both stop when their window closes or the
 machine reboots, and both must be running for the dashboard to work.
 
 ```bash
-"<NEO4J_HOME>\bin\neo4j.bat" console
+& "<NEO4J_HOME>\bin\neo4j.bat" console
 ```
 
 ```bash

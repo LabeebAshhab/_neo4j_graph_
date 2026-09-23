@@ -80,6 +80,10 @@
 :param top_customers      => 500;
 :param max_counterparties => 100;
 :param page_size          => 10;
+// counterparties per page at the bottom level (section 3.10). Same idea
+// as `page_size`, applied to the level that used to draw up to
+// `max_counterparties` nodes in one go.
+:param cp_page_size       => 10;
 
 
 // ---------------------------------------------------------------------
@@ -164,8 +168,11 @@ SET p.name           = 'Customers ' + toString(start + 1) + '-' +
     p.parent_key     = 'root',
     p.page           = pg,
     p.page_count     = page_count,
-    // click the page node and the NEXT ten arrive; the last wraps to 1
-    p.click          = 'cpage:' + toString(CASE WHEN pg = page_count THEN 1 ELSE pg + 1 END),
+    // Clicking the page node opens THIS page's ten customers. Moving
+    // between pages is the job of the Next / Previous buttons created in
+    // section 3.12 - previously this click jumped straight to the next
+    // page, which meant customers 1-10 could never actually be reached.
+    p.click          = 'cpage:' + toString(pg),
     p.total_credit   = total_credit,
     p.page_credit    = reduce(s = 0.0, x IN slice | s + x.credited),
     p.customer_count = customer_count,
@@ -297,6 +304,10 @@ SET c.name       = 'Credit',
     c.level      = 6,
     c.path       = x.path + 'credit/',
     c.parent_key = x.key,
+    // the TXN_TYPE_D_C node's own path. The graph card keeps Credit and
+    // Debit on screen for as long as the focus sits anywhere at or below
+    // that path, so the two stay side by side while you drill into either.
+    c.sib_path   = x.path,
     c.click      = 'credit:' + x.acc,
     c.total      = total,
     c.txn_count  = cnt,
@@ -330,6 +341,7 @@ SET dn.name       = 'Debit',
     dn.level      = 7,
     dn.path       = x.path + 'debit/',
     dn.parent_key = x.key,
+    dn.sib_path   = x.path,
     dn.click      = 'debit:' + x.acc,
     dn.total      = total,
     dn.txn_count  = cnt,
@@ -508,37 +520,76 @@ WITH n, cp_total, cp_count, rows,
 WITH n, cp_total, cp_count, rows[0..cut + 1] AS shown
 WITH n, cp_total, cp_count, shown,
      reduce(s = 0.0, x IN shown | s + x.amt) AS reached
+SET n.cp_shown = size(shown)
+WITH n, cp_total, cp_count, shown, reached
 
-// ... the counterparty nodes themselves
+// ... the counterparty pages, and the counterparties inside them.
+//     This level used to draw every counterparty at once (up to
+//     `max_counterparties`, i.e. as many as 100 nodes from a single
+//     click). It is now paged exactly like the customer level: the type
+//     node reveals one page, and Next / Previous move through the rest.
 CALL {
   WITH n, shown
-  UNWIND range(0, size(shown) - 1) AS i
-  WITH n, i, shown[i].cp AS cp, shown[i].amt AS amt, shown[i].cnt AS cnt
-  MERGE (r:Nav:CounterpartyNode {key: 'cp:' + n.key + ':' + cp})
+  WITH n, shown, toInteger(ceil(1.0 * size(shown) / $cp_page_size)) AS pg_count
+  UNWIND range(1, pg_count) AS pg
+  WITH n, shown, pg_count, pg, $cp_page_size * (pg - 1) AS start
+  WITH n, pg_count, pg, start, shown[start .. start + $cp_page_size] AS slice
+  WITH n, pg_count, pg, start, slice,
+       reduce(s = 0.0, x IN slice | s + x.amt) AS page_amt
+  MERGE (pp:Nav:CounterpartyPage {key: 'cppage:' + n.key + ':' + toString(pg)})
+  SET pp.name       = 'Customers ' + toString(start + 1) + '-' +
+                      toString(start + size(slice)) + ' of ' + toString(n.cp_shown),
+      pp.acc        = n.acc,
+      pp.txn_type   = n.txn_type,
+      pp.dc         = n.dc,
+      pp.level      = 10,
+      pp.page       = pg,
+      pp.page_count = pg_count,
+      pp.path       = n.path + 'cppage:' + toString(pg) + '/',
+      pp.parent_key = n.key,
+      pp.click      = 'cppage:' + n.key + ':' + toString(pg),
+      pp.amount     = page_amt,
+      pp.f_acc      = n.acc,
+      pp.f_dc       = n.dc,
+      pp.f_type     = n.txn_type,
+      pp.f_cp       = null
+  MERGE (n)-[e:EXPANDS]->(pp)
+  SET e.amount = page_amt,
+      e.name   = CASE
+                 WHEN abs(coalesce(page_amt,0.0)) >= 10000000 THEN toString(round(page_amt/10000000.0, 2)) + ' Crore tk'
+                 WHEN abs(coalesce(page_amt,0.0)) >= 100000   THEN toString(round(page_amt/100000.0, 2))   + ' Lakh tk'
+                 WHEN abs(coalesce(page_amt,0.0)) >= 1000     THEN toString(round(page_amt/1000.0, 2))     + ' Thousand tk'
+                 ELSE toString(round(coalesce(page_amt,0.0), 2)) + ' tk'
+               END
+
+  WITH pp, slice
+  UNWIND range(0, size(slice) - 1) AS i
+  WITH pp, i, slice[i].cp AS cp, slice[i].amt AS amt, slice[i].cnt AS cnt
+  MERGE (r:Nav:CounterpartyNode {key: 'cp:' + pp.key + ':' + cp})
   SET r.name         = 'Customer-' + cp,
-      r.acc          = n.acc,
+      r.acc          = pp.acc,
       r.counterparty = cp,
-      r.txn_type     = n.txn_type,
-      r.dc           = n.dc,
+      r.txn_type     = pp.txn_type,
+      r.dc           = pp.dc,
       r.rank         = i + 1,
-      r.level        = 10,
-      r.path         = n.path + 'cp:' + cp + '/',
-      r.parent_key   = n.key,
-      r.click        = 'cp:' + n.key + ':' + cp,
+      r.level        = 11,
+      r.path         = pp.path + 'cp:' + cp + '/',
+      r.parent_key   = pp.key,
+      r.click        = 'cp:' + pp.key + ':' + cp,
       r.amount       = amt,
       r.txn_count    = cnt,
-      r.f_acc        = n.acc,
-      r.f_dc         = n.dc,
-      r.f_type       = n.txn_type,
+      r.f_acc        = pp.acc,
+      r.f_dc         = pp.dc,
+      r.f_type       = pp.txn_type,
       r.f_cp         = cp
-  MERGE (n)-[e:EXPANDS]->(r)
-  SET e.amount = amt,
-      e.name   = CASE
-                   WHEN abs(coalesce(amt,0.0)) >= 10000000 THEN toString(round(amt/10000000.0, 2)) + ' Crore tk'
-                   WHEN abs(coalesce(amt,0.0)) >= 100000   THEN toString(round(amt/100000.0, 2))   + ' Lakh tk'
-                   WHEN abs(coalesce(amt,0.0)) >= 1000     THEN toString(round(amt/1000.0, 2))     + ' Thousand tk'
-                   ELSE toString(round(coalesce(amt,0.0), 2)) + ' tk'
-                 END
+  MERGE (pp)-[e2:EXPANDS]->(r)
+  SET e2.amount = amt,
+      e2.name   = CASE
+                 WHEN abs(coalesce(amt,0.0)) >= 10000000 THEN toString(round(amt/10000000.0, 2)) + ' Crore tk'
+                 WHEN abs(coalesce(amt,0.0)) >= 100000   THEN toString(round(amt/100000.0, 2))   + ' Lakh tk'
+                 WHEN abs(coalesce(amt,0.0)) >= 1000     THEN toString(round(amt/1000.0, 2))     + ' Thousand tk'
+                 ELSE toString(round(coalesce(amt,0.0), 2)) + ' tk'
+               END
   RETURN count(*) AS made
 }
 
@@ -614,6 +665,69 @@ SET e.amount = covered,
                            ELSE toString(round(target - covered, 2)) + ' tk'
                          END
                END;
+
+// ---------------------------------------------------------------------
+// 3.12 Next / Previous buttons for the two paged levels.
+//
+//      A button is an ordinary node whose `click` points at a sibling
+//      page, so paging needs no special handling in the dashboard - it
+//      is the same click-sets-focus mechanism as everything else.
+//
+//      Both wrap: Next on the last page returns to page 1, Previous on
+//      page 1 goes to the last. Pages are only created when there is
+//      more than one, so a single-page level stays clean.
+// ---------------------------------------------------------------------
+
+// 3.12a  buttons under each customer page
+MATCH (p:Nav:CustomerPage)
+WHERE p.page_count > 1
+UNWIND [
+  {dir: 'next', label: 'Next >',     tgt: CASE WHEN p.page = p.page_count THEN 1 ELSE p.page + 1 END},
+  {dir: 'prev', label: '< Previous', tgt: CASE WHEN p.page = 1 THEN p.page_count ELSE p.page - 1 END}
+] AS b
+MERGE (nb:Nav:PageNav {key: 'cnav:' + b.dir + ':' + toString(p.page)})
+SET nb.name       = b.label,
+    // level 2 (not 3) on purpose: these are page furniture, not data, and
+    // the "every node below level 2 carries a table filter" check in
+    // cypher/04 should not treat them as a drill-down step.
+    nb.level      = 2,
+    nb.path       = p.path + b.dir + '/',
+    nb.parent_key = p.key,
+    nb.click      = 'cpage:' + toString(b.tgt),
+    nb.page       = p.page,
+    nb.target     = b.tgt,
+    nb.f_acc      = null,
+    nb.f_dc       = null,
+    nb.f_type     = null,
+    nb.f_cp       = null
+MERGE (p)-[e:EXPANDS]->(nb)
+SET e.name = 'page ' + toString(b.tgt) + ' of ' + toString(p.page_count);
+
+
+// 3.12b  buttons under each counterparty page
+MATCH (pp:Nav:CounterpartyPage)
+WHERE pp.page_count > 1
+UNWIND [
+  {dir: 'next', label: 'Next >',     tgt: CASE WHEN pp.page = pp.page_count THEN 1 ELSE pp.page + 1 END},
+  {dir: 'prev', label: '< Previous', tgt: CASE WHEN pp.page = 1 THEN pp.page_count ELSE pp.page - 1 END}
+] AS b
+MERGE (nb:Nav:PageNav {key: 'cpnav:' + pp.key + ':' + b.dir})
+SET nb.name       = b.label,
+    nb.level      = 10,
+    nb.path       = pp.path + b.dir + '/',
+    nb.parent_key = pp.key,
+    nb.click      = 'cppage:' + pp.parent_key + ':' + toString(b.tgt),
+    nb.page       = pp.page,
+    nb.target     = b.tgt,
+    // inherit the page's filters so the table keeps showing this
+    // transaction type while you page through its counterparties
+    nb.f_acc      = pp.f_acc,
+    nb.f_dc       = pp.f_dc,
+    nb.f_type     = pp.f_type,
+    nb.f_cp       = null
+MERGE (pp)-[e:EXPANDS]->(nb)
+SET e.name = 'page ' + toString(b.tgt) + ' of ' + toString(pp.page_count);
+
 
 // ---------------------------------------------------------------------
 // 3.11 Report - node counts per level

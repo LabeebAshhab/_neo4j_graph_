@@ -1,18 +1,84 @@
 # =====================================================================
-# Append these lines to  <NEO4J_HOME>\conf\neo4j.conf
-# (uncomment/replace the existing versions of the same keys)
-# Neo4j 5.x key names.
+# KGN4j - Neo4j configuration
+#
+# Append to  <NEO4J_HOME>\conf\neo4j.conf
+#
+# IMPORTANT: these keys also appear COMMENTED OUT near the top of the
+# shipped neo4j.conf, with tiny placeholder values (512m heap, 256m
+# transaction pool, 16m per transaction). If you uncommented any of
+# those, comment them back out or delete them - a duplicate uncommented
+# key elsewhere in the file will fight with these.
+#
+# Sized for a 16 GB machine. See the bottom for other sizes.
+# Neo4j reads this file at startup only: RESTART after editing.
 # =====================================================================
 
+# ---------------------------------------------------------------------
+# Memory. This block is what makes a multi-million-row LOAD CSV finish.
+#
+# heap        - transaction state and query execution
+# pagecache   - the store files held in memory
+# transaction - the pool all concurrent transactions draw from.
+#               Defaults to 70% of heap. Too small and the load dies
+#               with "51N72: memory pool out of memory".
+# ---------------------------------------------------------------------
+server.memory.heap.initial_size=4g
+server.memory.heap.max_size=4g
+server.memory.pagecache.size=6g
+
+# Explicit rather than relying on the 70%-of-heap default.
+dbms.memory.transaction.total.max=2g
+
+# No per-transaction cap. The shipped sample sets 16m, which is far too
+# small for a batched LOAD CSV and fails immediately if left enabled.
+db.memory.transaction.max=0
+
+# ---------------------------------------------------------------------
+# LOAD CSV reads only from this folder, relative to NEO4J_HOME.
+# cypher/02b expects txn_for_graph.csv and account_summary.csv here.
+# ---------------------------------------------------------------------
+server.directories.import=import
+
+# ---------------------------------------------------------------------
+# Connectors. NeoDash connects over Bolt on 7687.
+# ---------------------------------------------------------------------
+server.bolt.enabled=true
+server.http.enabled=true
+
+# ---------------------------------------------------------------------
+# APOC is NOT required by this pipeline - cypher/02b uses core LOAD CSV
+# and CALL { } IN TRANSACTIONS. These two lines only matter if you add
+# APOC procedures of your own later. Harmless to leave in.
+# ---------------------------------------------------------------------
 dbms.security.procedures.unrestricted=apoc.*
 dbms.security.procedures.allowlist=apoc.*,gds.*
 
-# Bolt / HTTP - NeoDash connects over Bolt on 7687
-server.bolt.enabled=true
-server.bolt.listen_address=:7687
-server.http.enabled=true
-server.http.listen_address=:7474
 
-# Required so a browser app (NeoDash on http://localhost:3000) may talk
-# to the Bolt endpoint. Only needed if you see CORS / websocket errors.
-# server.unmanaged_extension_classes=
+# =====================================================================
+# SIZING FOR OTHER MACHINES
+#
+#   RAM     heap   pagecache   transaction.total.max
+#   ----    ----   ---------   ---------------------
+#    8 GB     2g          2g                      1g
+#   16 GB     4g          6g                      2g     <- this block
+#   32 GB     8g         12g                      4g
+#
+# Rule of thumb: heap + pagecache should leave at least 4 GB for the
+# operating system and anything else running (pgAdmin, PostgreSQL and
+# the NeoDash dev server all want their share).
+#
+# =====================================================================
+# VERIFY AFTER RESTARTING
+#
+#   SHOW SETTINGS YIELD name, value
+#   WHERE name IN ['server.memory.heap.max_size',
+#                  'server.memory.pagecache.size',
+#                  'dbms.memory.transaction.total.max',
+#                  'db.memory.transaction.max',
+#                  'server.directories.import']
+#   RETURN name, value;
+#
+# Expect 4.00GiB / 6.00GiB / 2.00GiB / 0B / <NEO4J_HOME>\import.
+# If a value does not match, the file was not saved, Neo4j was not
+# restarted, or a duplicate uncommented key is overriding it.
+# =====================================================================
