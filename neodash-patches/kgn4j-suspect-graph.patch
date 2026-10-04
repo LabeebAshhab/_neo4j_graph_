@@ -1,0 +1,617 @@
+diff --git a/src/config/ReportConfig.tsx b/src/config/ReportConfig.tsx
+index c97fce0..6732496 100644
+--- a/src/config/ReportConfig.tsx
++++ b/src/config/ReportConfig.tsx
+@@ -123,6 +123,13 @@ const _REPORT_TYPES = {
+         type: SELECTION_TYPES.NUMBER,
+         default: 3.5,
+       },
++      // KGN4j patch: a second caption, drawn outside the circle (to its right),
++      // read from this node property. Empty = off, i.e. stock behaviour.
++      nodeOuterLabelProp: {
++        label: 'Outside label property (drawn beside the node)',
++        type: SELECTION_TYPES.TEXT,
++        default: '',
++      },
+       defaultNodeSize: {
+         label: 'Node Size',
+         type: SELECTION_TYPES.NUMBER,
+diff --git a/src/chart/graph/GraphChart.tsx b/src/chart/graph/GraphChart.tsx
+index ef076eb..2e3e14d 100644
+--- a/src/chart/graph/GraphChart.tsx
++++ b/src/chart/graph/GraphChart.tsx
+@@ -155,6 +155,7 @@ const NeoGraphChart = (props: GraphChartProps) => {
+       linkDirectionalArrowLength: arrowLengthProp,
+       linkDirectionalParticleSpeed: settings.linkDirectionalParticleSpeed,
+       nodeLabelFontSize: settings.nodeLabelFontSize,
++      nodeOuterLabelProp: settings.nodeOuterLabelProp,
+       nodeLabelColor: theme == 'dark' && settings.nodeLabelColor == 'black' ? 'white' : settings.nodeLabelColor, // Temporary fix for default color adjustment in dark mode
+       relLabelFontSize: settings.relLabelFontSize,
+       relLabelColor: settings.relLabelColor,
+diff --git a/src/chart/graph/GraphChartVisualization.ts b/src/chart/graph/GraphChartVisualization.ts
+index de0d09a..2ede595 100644
+--- a/src/chart/graph/GraphChartVisualization.ts
++++ b/src/chart/graph/GraphChartVisualization.ts
+@@ -75,6 +75,7 @@ export interface GraphChartVisualizationProps {
+     linkDirectionalParticleSpeed: number;
+     linkDirectionalArrowLength: number;
+     nodeLabelFontSize: number;
++    nodeOuterLabelProp?: string;
+     nodeLabelColor: string;
+     relLabelFontSize: number;
+     relLabelColor: string;
+@@ -150,7 +151,8 @@ export interface GraphChartVisualizationProps {
+   config?: {
+     graphComponent: any;
+     cooldownAfterengineStop: number;
+-    nodeCanvasObjectMode?: () => void;
++    nodeCanvasObjectMode?: (node?: any) => any;
++    nodePointerAreaPaint?: (node: any, color: string, ctx: any) => void;
+     nodeCanvasObject?: (node: any, ctx: any) => void;
+     linkCanvasObjectMode?: () => void;
+     linkCanvasObject?: (link: any, ctx: any) => void;
+diff --git a/src/chart/graph/GraphChartVisualization2D.tsx b/src/chart/graph/GraphChartVisualization2D.tsx
+index 2f5c117..64f58a1 100644
+--- a/src/chart/graph/GraphChartVisualization2D.tsx
++++ b/src/chart/graph/GraphChartVisualization2D.tsx
+@@ -3,7 +3,7 @@ import ForceGraph2D from 'react-force-graph-2d';
+ import { executeActionRule, getRuleWithFieldPropertyName } from '../../extensions/advancedcharts/Utils';
+ import { getTooltip } from './component/GraphChartTooltip';
+ import { GraphChartVisualizationProps } from './GraphChartVisualization';
+-import { generateNodeCanvasObject } from './util/NodeUtils';
++import { generateNodeCanvasObject, kgnPointerArea, kgnShape } from './util/NodeUtils';
+ import { generateRelCanvasObject } from './util/RelUtils';
+ import { NeoGraphChartVisualizationBase } from './GraphChartVisualizationBase';
+ 
+@@ -14,7 +14,11 @@ export const NeoGraphChartVisualization2D = (props: GraphChartVisualizationProps
+   const config2d = {
+     graphComponent: ForceGraph2D,
+     cooldownAfterengineStop: 0,
+-    nodeCanvasObjectMode: () => 'after',
++    // KGN4j patch: nodes with a `shape` property are drawn entirely by
++    // generateNodeCanvasObject; all others keep the default circle.
++    nodeCanvasObjectMode: (node: any) => (kgnShape(node) ? 'replace' : 'after'),
++    nodePointerAreaPaint: (node: any, color: string, ctx: any) =>
++      kgnPointerArea(node, color, ctx, props.style.nodeLabelFontSize),
+     nodeCanvasObject: (node: any, ctx: any) =>
+       generateNodeCanvasObject(
+         node,
+@@ -26,7 +30,8 @@ export const NeoGraphChartVisualization2D = (props: GraphChartVisualizationProps
+         props.style.defaultNodeSize,
+         props.style.nodeLabelColor,
+         props.extensions.styleRules,
+-        props.engine.selection
++        props.engine.selection,
++        props.style.nodeOuterLabelProp
+       ),
+     linkCanvasObjectMode: () => 'after',
+     linkCanvasObject: (link: any, ctx: any) =>
+diff --git a/src/chart/graph/GraphChartVisualizationBase.tsx b/src/chart/graph/GraphChartVisualizationBase.tsx
+index 5ee7b50..6a3a7f0 100644
+--- a/src/chart/graph/GraphChartVisualizationBase.tsx
++++ b/src/chart/graph/GraphChartVisualizationBase.tsx
+@@ -1,15 +1,94 @@
+-import React, { useRef } from 'react';
++import React, { useEffect, useRef } from 'react';
+ import { executeActionRule, getRuleWithFieldPropertyName } from '../../extensions/advancedcharts/Utils';
+ import { getTooltip } from './component/GraphChartTooltip';
+ import { GraphChartVisualizationProps } from './GraphChartVisualization';
++import { kgnExtent } from './util/NodeUtils';
++import { kgnDraggedPositions } from './util/RecordUtils';
++
++// KGN4j patch: node keys each pinned graph drew last time. Kept outside the
++// component because NeoDash unmounts the chart while a query re-runs, which
++// would forget what was on screen before a click. Keyed by the graph's
++// first always-visible node, so different graph cards don't mix.
++const kgnLastShown: Record<string, Set<string>> = {};
+ 
+ export const NeoGraphChartVisualizationBase = (props: GraphChartVisualizationProps) => {
+   const fgRef: React.MutableRefObject<any> = useRef();
+   const GraphComponent = props.config?.graphComponent;
++  // KGN4j patch: a graph whose nodes are pinned (pin_x / pin_y) has no layout
++  // to wait for, so NeoDash's fit-after-layout may never fire. Fit it
++  // directly - and fit the text too: zoomToFit() only counts the circles,
++  // so the captions drawn beside them (nodeOuterLabelProp) were cut off.
++  // After a click the view goes to what the click OPENED (the new nodes and
++  // their parents); on first load, or when a click closed nodes, it fits
++  // everything. Graphs without pinned nodes are untouched.
++  useEffect(() => {
++    const nodes = props.data?.nodes || [];
++    if (!nodes.some((n: any) => n.fx !== undefined && n.properties && n.properties.pin_x !== undefined)) {
++      return;
++    }
++    if (!props.style.width || !props.style.height) {
++      return; // not laid out yet - try again once the card has a size
++    }
++    const keyOf = (n: any) => `${n.properties && n.properties.key !== undefined ? n.properties.key : n.id}`;
++    const graphId = nodes
++      .filter((n: any) => n.properties && (n.properties.parent_key === undefined || n.properties.parent_key === null))
++      .map(keyOf)
++      .sort()[0];
++    const before = kgnLastShown[graphId] || new Set<string>();
++    const added = nodes.filter((n: any) => !before.has(keyOf(n)));
++    const removed = [...before].some((k) => !nodes.some((n: any) => keyOf(n) === k));
++    kgnLastShown[graphId] = new Set(nodes.map(keyOf));
++    // same nodes as last time (NeoDash re-rendering, not a click): keep the
++    // current view, and whatever zoom / pan the user has made
++    if (before.size > 0 && added.length === 0 && !removed) {
++      return;
++    }
++    let target = nodes;
++    if (before.size > 0 && added.length > 0 && added.length < nodes.length) {
++      const parents = new Set(added.map((n: any) => `${n.properties && n.properties.parent_key}`));
++      target = nodes.filter((n: any) => added.includes(n) || parents.has(keyOf(n)));
++    }
++    const timer = setTimeout(() => kgnFit(target), 300);
++    return () => clearTimeout(timer);
++  }, [props.data, props.style.width, props.style.height]);
++
++  // KGN4j patch: fit a set of nodes INCLUDING their shapes and outside
++  // labels (NeoDash's zoomToFit only counts circles).
++  function kgnFit(target: any[]) {
++    const fg = fgRef.current;
++    if (!fg) {
++      return;
++    }
++    const font = props.style.nodeLabelFontSize || 3.5;
++    const outerProp = props.style.nodeOuterLabelProp;
++    let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity];
++    target.forEach((n: any) => {
++      const x = n.fx !== undefined ? n.fx : n.x;
++      const y = n.fy !== undefined ? n.fy : n.y;
++      if (x === undefined || y === undefined) {
++        return;
++      }
++      const [a0, b0, a1, b1] = kgnExtent(n, x, y, font, outerProp);
++      x0 = Math.min(x0, a0);
++      y0 = Math.min(y0, b0);
++      x1 = Math.max(x1, a1);
++      y1 = Math.max(y1, b1);
++    });
++    if (!Number.isFinite(x0)) {
++      return;
++    }
++    const pad = 30;
++    const w = props.style.width - 20 - 2 * pad;
++    const h = props.style.height - 2 * pad;
++    fg.centerAt((x0 + x1) / 2, (y0 + y1) / 2, 600);
++    fg.zoom(Math.min(w / Math.max(1, x1 - x0), h / Math.max(1, y1 - y0)), 600);
++  }
+   if (!props.style.width || !props.style.height) {
+     return <></>;
+   }
+-  props.interactivity.zoomToFit = () => fgRef.current && fgRef.current.zoomToFit(400);
++  const kgnPinned = (props.data?.nodes || []).some((n: any) => n.properties && n.properties.pin_x !== undefined);
++  props.interactivity.zoomToFit = () =>
++    kgnPinned ? kgnFit(props.data.nodes) : fgRef.current && fgRef.current.zoomToFit(400);
+   return (
+     <GraphComponent
+       ref={fgRef}
+@@ -58,7 +137,12 @@ export const NeoGraphChartVisualizationBase = (props: GraphChartVisualizationPro
+             }
+           });
+         }
+-        if (props.engine.recenterAfterEngineStop) {
++        // KGN4j patch: graphs with pinned nodes are fitted by the effect above
++        // (zoom to what a click opened); NeoDash's fit-everything here would
++        // undo that a moment later.
++        if (props.engine.recenterAfterEngineStop && kgnPinned) {
++          props.engine.setRecenterAfterEngineStop(false);
++        } else if (props.engine.recenterAfterEngineStop) {
+           if (props.interactivity.pinAllAfterLayout) {
+             fgRef.current.zoomToFit(400, 30);
+           } else {
+@@ -80,6 +164,11 @@ export const NeoGraphChartVisualizationBase = (props: GraphChartVisualizationPro
+         if (props.interactivity.fixNodeAfterDrag) {
+           node.fx = node.x;
+           node.fy = node.y;
++          // KGN4j patch: remember where a pinned node was dragged to, so the
++          // arrangement survives the next click (which rebuilds the graph).
++          if (node.properties && node.properties.pin_x !== undefined) {
++            kgnDraggedPositions[`${node.properties.key !== undefined ? node.properties.key : node.id}`] = [node.x, node.y];
++          }
+           if (node.z !== undefined) {
+             node.fz = node.z;
+           }
+@@ -96,6 +185,7 @@ export const NeoGraphChartVisualizationBase = (props: GraphChartVisualizationPro
+       // 2D-specific config settings
+       nodeCanvasObjectMode={props.config?.nodeCanvasObjectMode}
+       nodeCanvasObject={props.config?.nodeCanvasObject}
++      nodePointerAreaPaint={props.config?.nodePointerAreaPaint}
+       linkCanvasObjectMode={props.config?.linkCanvasObjectMode}
+       linkCanvasObject={props.config?.linkCanvasObject}
+       // 3D-specific config settings
+diff --git a/src/chart/graph/component/GraphChartTooltip.tsx b/src/chart/graph/component/GraphChartTooltip.tsx
+index da5f885..164cce4 100644
+--- a/src/chart/graph/component/GraphChartTooltip.tsx
++++ b/src/chart/graph/component/GraphChartTooltip.tsx
+@@ -7,7 +7,83 @@ import { Node } from '../GraphChartVisualization';
+ /**
+  * Renders a tooltip above the user's cursor showing information on the selected node/relationship.
+  */
++// KGN4j patch: nodes that carry a `role` (the Suspect Network graph) get a
++// short tooltip in plain words instead of every internal property.
++const KGN_FIELDS: [string, string][] = [
++  ['outer', 'Name / number'],
++  ['name', 'Shown inside'],
++  ['outer2', 'Amount'],
++  ['amount', 'Amount (exact, tk)'],
++  ['credit_amount', 'Credit (tk)'],
++  ['debit_amount', 'Debit (tk)'],
++  ['txn_mode', 'TXN_MODE'],
++  ['with_wallets', 'TXN_WITH_ACC wallets'],
++  ['suspected_wallets', 'Suspected wallets'],
++  ['txn_count', 'TXN_COUNT'],
++  ['status', 'Status'],
++  ['account_type', 'Account type'],
++  ['wallet_count', 'Wallets'],
++  ['data_total', 'Sheet total (tk)'],
++];
++
++const kgnValue = (v: any) => {
++  const n = typeof v === 'number' ? v : v && typeof v.toNumber === 'function' ? v.toNumber() : undefined;
++  if (n !== undefined) {
++    return n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
++  }
++  return Array.isArray(v) ? v.join(', ') : `${v}`;
++};
++
++function kgnTooltip(title: string, rows: [string, any][]) {
++  return ReactDOMServer.renderToString(
++    <Card>
++      <b style={{ padding: '10px', display: 'block' }}>{title}</b>
++      <TableContainer>
++        <Table size='small'>
++          <TableBody>
++            {rows.map(([label, value]) => (
++              <TableRow key={label}>
++                <TableCell component='th' scope='row' style={{ padding: '3px', paddingLeft: '8px' }}>
++                  {label}
++                </TableCell>
++                <TableCell align={'left'} style={{ padding: '3px', paddingLeft: '8px' }}>
++                  {kgnValue(value)}
++                </TableCell>
++              </TableRow>
++            ))}
++          </TableBody>
++        </Table>
++      </TableContainer>
++    </Card>
++  );
++}
++
+ export function getTooltip(entity: Node | Link) {
++  const p: any = entity.properties || {};
++  if (p.role) {
++    const rows = KGN_FIELDS.filter(([k]) => p[k] !== undefined && p[k] !== null && `${p[k]}` !== '').map(
++      ([k, label]) => [label, p[k]] as [string, any]
++    );
++    return kgnTooltip(p.role, rows);
++  }
++  const e: any = entity;
++  if (e.source && e.source.properties && e.source.properties.role && e.target && e.target.properties) {
++    const end = (n: any) => [n.properties.name, n.properties.outer].filter((x) => x !== undefined && `${x}` !== '').join(' ');
++    const rows: [string, any][] = [
++      ['From', end(e.source)],
++      ['To', end(e.target)],
++    ];
++    if (p.amount_text || p.name) {
++      rows.push(['Shows', p.amount_text || p.name]);
++    }
++    if (p.amount !== undefined && p.amount !== null) {
++      rows.push(['Amount (exact, tk)', p.amount]);
++    }
++    if (p.wallet_count !== undefined && p.wallet_count !== null) {
++      rows.push(['Wallets', p.wallet_count]);
++    }
++    return kgnTooltip('Link', rows);
++  }
+   const tooltip = (
+     <Card>
+       <b style={{ padding: '10px' }}>
+diff --git a/src/chart/graph/util/NodeUtils.ts b/src/chart/graph/util/NodeUtils.ts
+index f40b5ee..dbf354f 100644
+--- a/src/chart/graph/util/NodeUtils.ts
++++ b/src/chart/graph/util/NodeUtils.ts
+@@ -63,7 +63,8 @@ export const generateNodeCanvasObject = (
+   defaultNodeSize: any,
+   nodeLabelColor: any,
+   styleRules: any,
+-  selection: any
++  selection: any,
++  outerLabelProp?: string
+ ) => {
+   if (icons && icons[node.mainLabel]) {
+     drawDataURIOnCanvas(node, icons[node.mainLabel], ctx, defaultNodeSize);
+@@ -71,9 +72,89 @@ export const generateNodeCanvasObject = (
+     const label = selection && selection[node.mainLabel] ? getNodeLabel(selection, node) : '';
+     const fontSize = nodeLabelFontSize;
+     ctx.font = `${fontSize}px Sans-Serif`;
+-    ctx.fillStyle = evaluateRulesOnNode(node, 'node label color', nodeLabelColor, styleRules);
++    // KGN4j patch: a node with a `shape` property is drawn by us (the 2D
++    // config switches it to 'replace' mode), before its caption.
++    if (kgnShape(node)) {
++      kgnTraceShape(node, ctx, fontSize);
++      ctx.fillStyle = node.color || '#cccccc';
++      ctx.fill();
++      ctx.lineWidth = 0.6;
++      ctx.strokeStyle = 'rgba(40, 55, 70, 0.35)';
++      if (kgnShape(node) === 'dashed') {
++        ctx.setLineDash([2, 1.5]);
++        ctx.strokeStyle = 'rgba(40, 55, 70, 0.6)';
++      }
++      ctx.stroke();
++      ctx.setLineDash([]);
++      ctx.font = `${fontSize}px Sans-Serif`;
++    }
++    const labelColor = evaluateRulesOnNode(node, 'node label color', nodeLabelColor, styleRules);
++    // KGN4j patch: `text_color` on a node overrides the colour of the text
++    // INSIDE it (e.g. white on dark green); the text beside it keeps the
++    // normal label colour.
++    ctx.fillStyle = kgnShape(node) && node.properties.text_color ? node.properties.text_color : labelColor;
+     ctx.textAlign = 'center';
+     ctx.fillText(label, node.x ? node.x : 0, node.y ? node.y + 1 : 0);
++    ctx.fillStyle = labelColor;
++    // KGN4j patch: optional second caption outside the node, read from
++    // `outerLabelProp`. Drawn to the right of the node - or, when the node
++    // carries `label_angle` (radians), pointing outwards along that angle,
++    // flipped on the left half so it always reads left to right. Nodes laid
++    // out on a ring get labels that fan out like spokes and never collide.
++    const outer = outerLabelProp && node.properties ? node.properties[outerLabelProp] : undefined;
++    if (outer !== undefined && outer !== null && `${outer}` !== '') {
++      const x = node.x ? node.x : 0;
++      const y = node.y ? node.y : 0;
++      const angle = kgnLabelAngle(node);
++      // an optional second, smaller line under the label (`outer2`) - used
++      // for the amount on ring / fan nodes, so their spokes need no caption
++      const sub = node.properties && node.properties.outer2 ? `${node.properties.outer2}` : '';
++      const mainColor = ctx.fillStyle;
++      const line1 = sub ? -fontSize * 0.5 : 0;
++      const line2 = fontSize * 0.55;
++      // a halo in the canvas colour behind the text: any link that runs
++      // behind a label is masked, so the text always reads cleanly
++      const halo = (text: string, px: number, py: number) => {
++        if (kgnShape(node)) {
++          ctx.lineJoin = 'round';
++          ctx.lineWidth = fontSize * 0.45;
++          ctx.strokeStyle = 'rgba(250, 250, 247, 0.92)';
++          ctx.strokeText(text, px, py);
++        }
++      };
++      const drawLines = (px: number, align: string) => {
++        ctx.textAlign = align;
++        ctx.font = `${fontSize}px Sans-Serif`;
++        ctx.fillStyle = mainColor;
++        halo(`${outer}`, px, line1);
++        ctx.fillText(`${outer}`, px, line1);
++        if (sub) {
++          ctx.font = `${fontSize * 0.8}px Sans-Serif`;
++          ctx.fillStyle = 'rgba(70, 82, 94, 0.85)';
++          halo(sub, px, line2);
++          ctx.fillText(sub, px, line2);
++          ctx.font = `${fontSize}px Sans-Serif`;
++          ctx.fillStyle = mainColor;
++        }
++      };
++      ctx.textBaseline = 'middle';
++      ctx.save();
++      ctx.translate(x, y);
++      if (angle === undefined) {
++        drawLines(kgnReach(node, fontSize, 0) + 1.5, 'left');
++      } else {
++        const gap = kgnReach(node, fontSize, angle) + 1.5;
++        if (Math.cos(angle) >= 0) {
++          ctx.rotate(angle);
++          drawLines(gap, 'left');
++        } else {
++          ctx.rotate(angle + Math.PI);
++          drawLines(-gap, 'right');
++        }
++      }
++      ctx.restore();
++      ctx.textBaseline = 'alphabetic';
++    }
+     if (frozen && !node.fx && !node.fy && nodePositions) {
+       node.fx = node.x;
+       node.fy = node.y;
+@@ -86,3 +167,151 @@ export const generateNodeCanvasObject = (
+     }
+   }
+ };
++
++// ---------------------------------------------------------------------------
++// KGN4j patch: node shapes. Only nodes that carry a `shape` property are
++// affected - every other dashboard keeps NeoDash's plain circles.
++//   circle   - a count of wallets
++//   box      - one specific account / wallet (sized to fit its caption)
++//   diamond  - an amount of money
++//   hexagon  - a transaction type
++//   dashed   - an "Others" roll-up
++// ---------------------------------------------------------------------------
++export const kgnShape = (node: any): string | undefined =>
++  node && node.properties && node.properties.shape ? `${node.properties.shape}` : undefined;
++
++export const kgnLabelAngle = (node: any): number | undefined => {
++  const a = node && node.properties ? node.properties.label_angle : undefined;
++  if (a === undefined || a === null) {
++    return undefined;
++  }
++  const n = typeof a === 'number' ? a : typeof a.toNumber === 'function' ? a.toNumber() : Number(a);
++  return Number.isFinite(n) ? n : undefined;
++};
++
++const kgnMeasure = (() => {
++  let ctx: any;
++  return (text: string, fontSize: number) => {
++    if (!ctx) {
++      ctx = document.createElement('canvas').getContext('2d');
++    }
++    if (!ctx) {
++      return text.length * fontSize * 0.55;
++    }
++    ctx.font = `${fontSize}px Sans-Serif`;
++    return ctx.measureText(text).width;
++  };
++})();
++
++export const kgnRadius = (node: any) => Math.sqrt(Math.max(0, Number(node.size) || 1)) * 4;
++
++// half width / half height of the drawn shape
++export const kgnHalfSize = (node: any, fontSize: number): [number, number] => {
++  const r = kgnRadius(node);
++  switch (kgnShape(node)) {
++    case 'box': {
++      const name = node.properties && node.properties.name !== undefined ? `${node.properties.name}` : '';
++      return [Math.max(kgnMeasure(name, fontSize) / 2 + 4, fontSize), fontSize * 0.95];
++    }
++    case 'diamond':
++      return [r * 1.25, r * 1.25];
++    case 'hexagon':
++      return [r * 1.08, r * 0.94];
++    default:
++      return [r, r];
++  }
++};
++
++// distance from the centre to the shape's edge in direction `angle`
++export const kgnReach = (node: any, fontSize: number, angle: number) => {
++  const [hw, hh] = kgnHalfSize(node, fontSize);
++  const shape = kgnShape(node);
++  if (shape === 'box') {
++    const c = Math.abs(Math.cos(angle));
++    const s = Math.abs(Math.sin(angle));
++    return Math.min(c > 1e-6 ? hw / c : Infinity, s > 1e-6 ? hh / s : Infinity);
++  }
++  if (shape === 'diamond') {
++    return hw / (Math.abs(Math.cos(angle)) + Math.abs(Math.sin(angle)));
++  }
++  return hw; // circle, dashed circle, hexagon (close enough for a label gap)
++};
++
++export const kgnTraceShape = (node: any, ctx: any, fontSize: number) => {
++  const x = node.x ? node.x : 0;
++  const y = node.y ? node.y : 0;
++  const [hw, hh] = kgnHalfSize(node, fontSize);
++  ctx.beginPath();
++  switch (kgnShape(node)) {
++    case 'box': {
++      const r = Math.min(3, hh);
++      ctx.moveTo(x - hw + r, y - hh);
++      ctx.lineTo(x + hw - r, y - hh);
++      ctx.quadraticCurveTo(x + hw, y - hh, x + hw, y - hh + r);
++      ctx.lineTo(x + hw, y + hh - r);
++      ctx.quadraticCurveTo(x + hw, y + hh, x + hw - r, y + hh);
++      ctx.lineTo(x - hw + r, y + hh);
++      ctx.quadraticCurveTo(x - hw, y + hh, x - hw, y + hh - r);
++      ctx.lineTo(x - hw, y - hh + r);
++      ctx.quadraticCurveTo(x - hw, y - hh, x - hw + r, y - hh);
++      break;
++    }
++    case 'diamond':
++      ctx.moveTo(x, y - hh);
++      ctx.lineTo(x + hw, y);
++      ctx.lineTo(x, y + hh);
++      ctx.lineTo(x - hw, y);
++      break;
++    case 'hexagon':
++      for (let i = 0; i < 6; i++) {
++        const a = (Math.PI / 3) * i;
++        const px = x + hw * Math.cos(a);
++        const py = y + hw * Math.sin(a);
++        if (i === 0) {
++          ctx.moveTo(px, py);
++        } else {
++          ctx.lineTo(px, py);
++        }
++      }
++      break;
++    default:
++      ctx.arc(x, y, hw, 0, 2 * Math.PI, false);
++  }
++  ctx.closePath();
++};
++
++// Click / hover area: the shape itself, so a whole box is clickable.
++export const kgnPointerArea = (node: any, color: string, ctx: any, fontSize: number) => {
++  if (kgnShape(node)) {
++    kgnTraceShape(node, ctx, fontSize);
++  } else {
++    ctx.beginPath();
++    ctx.arc(node.x || 0, node.y || 0, kgnRadius(node), 0, 2 * Math.PI, false);
++  }
++  ctx.fillStyle = color;
++  ctx.fill();
++};
++
++// Bounding box of a node including its outside label - used to fit the view.
++export const kgnExtent = (node: any, x: number, y: number, fontSize: number, outerProp?: string) => {
++  const [hw, hh] = kgnShape(node) ? kgnHalfSize(node, fontSize) : [kgnRadius(node), kgnRadius(node)];
++  let [x0, y0, x1, y1] = [x - hw, y - Math.max(hh, fontSize / 2), x + hw, y + Math.max(hh, fontSize / 2)];
++  const outer = outerProp && node.properties ? node.properties[outerProp] : undefined;
++  if (outer !== undefined && outer !== null && `${outer}` !== '') {
++    const sub = node.properties && node.properties.outer2 ? `${node.properties.outer2}` : '';
++    const w = Math.max(kgnMeasure(`${outer}`, fontSize), sub ? kgnMeasure(sub, fontSize * 0.8) : 0);
++    const angle = kgnLabelAngle(node);
++    const a = angle === undefined ? 0 : angle;
++    const start = kgnReach(node, fontSize, a) + 1.5;
++    const ex = x + Math.cos(a) * (start + w);
++    const ey = y + Math.sin(a) * (start + w);
++    x0 = Math.min(x0, ex);
++    x1 = Math.max(x1, ex);
++    const thick = sub ? fontSize * 1.1 : fontSize / 2;
++    x0 = Math.min(x0, ex - thick);
++    x1 = Math.max(x1, ex + thick);
++    y0 = Math.min(y0, ey - thick);
++    y1 = Math.max(y1, ey + thick);
++  }
++  return [x0, y0, x1, y1];
++};
+diff --git a/src/chart/graph/util/RecordUtils.ts b/src/chart/graph/util/RecordUtils.ts
+index f2d6dd4..a6446e4 100644
+--- a/src/chart/graph/util/RecordUtils.ts
++++ b/src/chart/graph/util/RecordUtils.ts
+@@ -1,6 +1,10 @@
+ import { evaluateRulesOnNode, evaluateRulesOnLink } from '../../../extensions/styling/StyleRuleEvaluator';
+ import { extractNodePropertiesFromRecords, mergeNodePropsFieldsLists } from '../../../report/ReportRecordProcessing';
+ import { valueIsArray, valueIsNode, valueIsRelationship, valueIsPath, toNumber } from '../../ChartUtils';
++
++// KGN4j patch: positions of pinned nodes the user has dragged, by node `key`.
++// Kept for the browser session so re-running the query keeps the layout.
++export const kgnDraggedPositions: Record<string, [number, number]> = {};
+ import { GraphChartVisualizationProps } from '../GraphChartVisualization';
+ import { assignCurvatureToLink } from './RelUtils';
+ import { isNode } from 'neo4j-driver-core/lib/graph-types.js';
+@@ -58,6 +62,16 @@ function extractGraphEntitiesFromField(
+     if (frozen && nodePositions && nodePositions[value.identity.low]) {
+       nodes[value.identity.low].fx = nodePositions[value.identity.low][0];
+       nodes[value.identity.low].fy = nodePositions[value.identity.low][1];
++    } else if (value.properties.pin_x !== undefined && value.properties.pin_y !== undefined) {
++      // KGN4j patch: a node that carries pin_x / pin_y is drawn at exactly that
++      // position instead of wherever the force layout puts it. Nodes without
++      // them (every existing dashboard) are laid out as before.
++      // Integer.toNumber() - NeoDash's own toNumber() gets negative
++      // integers wrong (-230 comes back as -4294967526).
++      const pin = (v) => (typeof v === 'number' ? v : typeof v?.toNumber === 'function' ? v.toNumber() : Number(v));
++      const dragged = kgnDraggedPositions[`${value.properties.key !== undefined ? value.properties.key : value.identity.low}`];
++      nodes[value.identity.low].fx = dragged ? dragged[0] : pin(value.properties.pin_x);
++      nodes[value.identity.low].fy = dragged ? dragged[1] : pin(value.properties.pin_y);
+     }
+   } else if (valueIsRelationship(value)) {
+     if (links[`${value.start.low},${value.end.low}`] == undefined) {
+diff --git a/src/chart/graph/util/RelUtils.ts b/src/chart/graph/util/RelUtils.ts
+index e902abb..0d86a06 100644
+--- a/src/chart/graph/util/RelUtils.ts
++++ b/src/chart/graph/util/RelUtils.ts
+@@ -62,6 +62,12 @@ export function getCurvature(index, total) {
+ export const selfLoopRotationDegrees = 45;
+ 
+ export const generateRelCanvasObject = (link: any, ctx: any, relLabelFontSize: any, relLabelColor: any) => {
++  // KGN4j patch: a relationship whose `name` is deliberately '' gets no
++  // caption at all (NeoDash used to fall back to the type, e.g. "SFLOW").
++  // A relationship with no `name` property still shows its type.
++  if (link.properties && link.properties.name === '') {
++    return;
++  }
+   const label = link.properties.name || link.type || link.id;
+   const fontSize = relLabelFontSize;
+   const { source } = link;

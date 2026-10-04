@@ -1,0 +1,269 @@
+{
+  "title": "KGN4j - Suspect Network",
+  "version": "2.4",
+  "settings": {
+    "pagenumber": 0,
+    "editable": true,
+    "fullscreenEnabled": true,
+    "parameters": {
+      "neodash_sus_focus": ""
+    },
+    "downloadImageEnabled": true,
+    "theme": "light"
+  },
+  "pages": [
+    {
+      "title": "Suspect Network",
+      "reports": [
+        {
+          "id": "sus-legend",
+          "title": "What the shapes and colours mean",
+          "query": "// CARD - \"What the shapes and colours mean\" (report type: Graph)\n// The legend nodes built in cypher/suspect/02 section 3.11 - drawn with\n// exactly the shapes and colours the main graph uses.\nMATCH (l:SLegend)\nRETURN l\nORDER BY l.rank\n",
+          "width": 5,
+          "height": 6,
+          "x": 0,
+          "y": 0,
+          "type": "graph",
+          "selection": {
+            "SLegend": "name"
+          },
+          "settings": {
+            "backgroundColor": "#FAFAF7",
+            "defaultRelColor": "#C3CBD3",
+            "relLabelColor": "#7D8894",
+            "nodeLabelColor": "#2F3B45",
+            "layout": "force-directed",
+            "nodeColorProp": "color",
+            "nodeSizeProp": "size",
+            "nodeOuterLabelProp": "outer",
+            "nodeLabelFontSize": 9,
+            "showPropertiesOnHover": false,
+            "showPropertiesOnClick": false,
+            "enableExploration": false,
+            "enableEditing": false,
+            "hideSelections": true,
+            "downloadImageEnabled": true,
+            "description": "Rounded box = an account (Agent, Customer, Merchant, TR) or one wallet. Circle = a number of wallets; its colour is the status. Hexagon = a transaction type. Diamond = an amount. Dashed = \"Others\", the rest grouped together. Arrows point the way the money or the breakdown goes."
+          },
+          "schema": []
+        },
+        {
+          "id": "sus-graph",
+          "title": "Suspect network",
+          "query": "// CARD - \"Suspect network\" (report type: Graph)\n// Draws the base graph (every node without a `parent_key`), plus the\n// nodes opened by clicks: a hidden node is drawn when its parent is on\n// the clicked node's `chain` (the clicked node and its ancestors).\n//   click Others (service fees)  -> the service fee types\n//   click More types             -> the smaller transaction types\n//   click a type / fee type      -> its suspected wallets\n//   click a suspected wallet     -> its TXN_WITH_ACC counterparties\n//   click any base node          -> everything closes again\n// A stale / unknown focus draws the base graph only.\nWITH coalesce($neodash_sus_focus, '') AS fk\nOPTIONAL MATCH (f:SNet {key: fk})\nWITH coalesce(f.chain, []) AS chain\nMATCH (n:SNet)\nWHERE n.parent_key IS NULL OR n.parent_key IN chain\nWITH collect(n) AS shown\nUNWIND shown AS a\nMATCH p = (a)-[:SFLOW]->(b)\nWHERE b IN shown\nRETURN p\n",
+          "width": 19,
+          "height": 6,
+          "x": 5,
+          "y": 0,
+          "type": "graph",
+          "selection": {
+            "SNet": "name",
+            "SStatic": "name",
+            "SWallets": "name",
+            "STypeHub": "name",
+            "SType": "name",
+            "SMoreTypes": "name",
+            "SFeeGroup": "name",
+            "SFeeType": "name",
+            "SWallet": "name",
+            "SWalletOthers": "name",
+            "SCounterparty": "name",
+            "SCounterpartyOthers": "name",
+            "SFLOW": "name"
+          },
+          "settings": {
+            "backgroundColor": "#FAFAF7",
+            "defaultRelColor": "#C3CBD3",
+            "relLabelColor": "#7D8894",
+            "nodeLabelColor": "#2F3B45",
+            "layout": "force-directed",
+            "nodeColorProp": "color",
+            "nodeSizeProp": "size",
+            "nodeOuterLabelProp": "outer",
+            "nodeLabelFontSize": 9,
+            "relLabelFontSize": 7,
+            "defaultRelWidth": 1.2,
+            "showPropertiesOnHover": true,
+            "showPropertiesOnClick": true,
+            "fixNodeAfterDrag": true,
+            "pinAllAfterLayout": true,
+            "lockable": true,
+            "enableExploration": false,
+            "enableEditing": false,
+            "hideSelections": true,
+            "downloadImageEnabled": true,
+            "fullscreenEnabled": true,
+            "description": "Click a transaction type (or More types / Others / a service fee type) to fan out its suspected wallets; click a wallet to fan out who it transacted with. Click any base node to close. Drag any node to rearrange - it stays put. Scroll to zoom.",
+            "actionsRules": [
+              {
+                "condition": "onNodeClick",
+                "field": "SNet",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "sus_focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "SStatic",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "sus_focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "SWallets",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "sus_focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "STypeHub",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "sus_focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "SType",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "sus_focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "SMoreTypes",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "sus_focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "SFeeGroup",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "sus_focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "SFeeType",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "sus_focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "SWallet",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "sus_focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "SWalletOthers",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "sus_focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "SCounterparty",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "sus_focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "SCounterpartyOthers",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "sus_focus"
+              }
+            ]
+          },
+          "schema": []
+        },
+        {
+          "id": "sus-selected",
+          "title": "Selected",
+          "query": "// CARD - \"Selected\" (report type: Table, single row)\n// What was clicked, and what the rows table is filtered to.\nWITH coalesce($neodash_sus_focus, '') AS fk\nOPTIONAL MATCH (f:SNet {key: fk})\nWITH f, [x IN [\n       CASE WHEN f.f_types   IS NOT NULL THEN 'TXN_TYPE IN ' + reduce(s = '', t IN f.f_types | CASE WHEN s = '' THEN t ELSE s + ', ' + t END) END,\n       CASE WHEN f.f_wallet  IS NOT NULL THEN 'SUSPECTED_WALLET = ' + f.f_wallet END,\n       CASE WHEN f.f_wallets IS NOT NULL THEN 'SUSPECTED_WALLET IN (' + toString(size(f.f_wallets)) + ' wallets)' END,\n       CASE WHEN f.f_with    IS NOT NULL THEN 'TXN_WITH_ACC = ' + f.f_with END,\n       CASE WHEN f.f_mode    IS NOT NULL THEN 'TXN_MODE = ' + f.f_mode END\n     ] WHERE x IS NOT NULL] AS filters\nRETURN coalesce(f.name, '-')  AS INSIDE,\n       coalesce(f.outer, '')  AS OUTSIDE,\n       CASE WHEN size(filters) = 0 THEN 'all rows'\n            ELSE reduce(s = '', x IN filters | CASE WHEN s = '' THEN x ELSE s + '  AND  ' + x END)\n       END AS ROWS_TABLE_FILTER,\n       CASE WHEN f.amount IS NULL THEN coalesce(f.total, f.data_total) ELSE f.amount END AS AMOUNT\n",
+          "width": 8,
+          "height": 2,
+          "x": 0,
+          "y": 6,
+          "type": "table",
+          "selection": {},
+          "settings": {
+            "compact": true,
+            "wrapContent": true
+          },
+          "schema": []
+        },
+        {
+          "id": "sus-types",
+          "title": "By TXN_TYPE (all types)",
+          "query": "// CARD - \"By TXN_TYPE\" (report type: Table)\n// Every transaction type in the sheet, including the ones the graph\n// rolls into \"Others\". Amounts in tk; CRORE is the same figure / 1e7.\nMATCH (r:SusRow)\nWITH r.txn_type AS TXN_TYPE,\n     sum(r.amount) AS amt,\n     sum(CASE WHEN r.txn_mode = 'CREDIT' THEN r.amount ELSE 0 END) AS cr,\n     sum(CASE WHEN r.txn_mode = 'DEBIT'  THEN r.amount ELSE 0 END) AS dr,\n     count(DISTINCT r.with_acc) AS with_wallets,\n     count(DISTINCT r.wallet)   AS suspected,\n     sum(r.txn_count)           AS txns\nRETURN TXN_TYPE,\n       with_wallets         AS TXN_WITH_WALLETS,\n       suspected            AS SUSPECTED_WALLETS,\n       txns                 AS TXN_COUNT,\n       round(amt, 2)        AS TXN_AMOUNT,\n       round(amt / 1e7, 2)  AS CRORE,\n       round(cr, 2)         AS CREDIT,\n       round(dr, 2)         AS DEBIT\nORDER BY TXN_AMOUNT DESC\n",
+          "width": 8,
+          "height": 5,
+          "x": 0,
+          "y": 8,
+          "type": "table",
+          "selection": {},
+          "settings": {
+            "compact": true,
+            "allowDownload": true,
+            "defaultPageSize": 10
+          },
+          "schema": []
+        },
+        {
+          "id": "sus-rows",
+          "title": "Sheet rows (follows the clicked node)",
+          "query": "// CARD - \"Sheet rows\" (report type: Table)\n// The source rows behind the node clicked in the graph.\n//   a TXN_TYPE node (P2P, CASH OUT, ...) -> that type\n//   Others (types)                       -> the types rolled into it\n//   a suspected wallet                   -> that wallet, within the type\n//   Others (wallets)                     -> those wallets, within the type\n//   a TXN_WITH_ACC node                  -> that wallet + counterparty + mode\n//   any other node                       -> every row (top by amount)\n// Unknown / stale focus falls back to every row.\nWITH coalesce($neodash_sus_focus, '') AS fk\nOPTIONAL MATCH (f:SNet {key: fk})\nWITH f.f_types AS types, f.f_wallet AS wallet, f.f_wallets AS wallets,\n     f.f_with AS with_acc, f.f_mode AS mode\nMATCH (r:SusRow)\nWHERE (types    IS NULL OR r.txn_type IN types)\n  AND (wallet   IS NULL OR r.wallet = wallet)\n  AND (wallets  IS NULL OR r.wallet IN wallets)\n  AND (with_acc IS NULL OR r.with_acc = with_acc)\n  AND (mode     IS NULL OR r.txn_mode = mode)\nRETURN r.wallet    AS SUSPECTED_WALLET,\n       r.with_acc  AS TXN_WITH_ACC,\n       r.txn_type  AS TXN_TYPE,\n       r.txn_mode  AS TXN_MODE,\n       r.txn_count AS TXN_COUNT,\n       r.amount    AS TXN_AMOUNT\nORDER BY TXN_AMOUNT DESC\nLIMIT 2000\n",
+          "width": 16,
+          "height": 7,
+          "x": 8,
+          "y": 6,
+          "type": "table",
+          "selection": {},
+          "settings": {
+            "compact": true,
+            "allowDownload": true,
+            "defaultPageSize": 25,
+            "description": "Top 2,000 rows by TXN_AMOUNT behind the clicked node (type -> wallet -> counterparty); every row for a base node."
+          },
+          "schema": []
+        },
+        {
+          "id": "sus-graph-export",
+          "title": "Graph data (export) - what the graph shows right now",
+          "query": "// CARD - \"Graph data (export)\" (report type: Table, CSV download on)\n// One row per relationship currently drawn in the graph - the same\n// reveal rule as cards/graph.cypher - so the export always matches the\n// picture. FROM / TO give what is written inside and beside each node.\nWITH coalesce($neodash_sus_focus, '') AS fk\nOPTIONAL MATCH (f:SNet {key: fk})\nWITH coalesce(f.chain, []) AS chain\nMATCH (n:SNet)\nWHERE n.parent_key IS NULL OR n.parent_key IN chain\nWITH collect(n) AS shown\nUNWIND shown AS a\nMATCH (a)-[r:SFLOW]->(b)\nWHERE b IN shown\nRETURN a.role                          AS FROM_NODE,\n       a.name                          AS FROM_INSIDE,\n       coalesce(a.outer, '')           AS FROM_OUTSIDE,\n       coalesce(r.amount_text, r.name, '') AS RELATION,\n       r.amount                        AS AMOUNT_TK,\n       b.role                          AS TO_NODE,\n       b.name                          AS TO_INSIDE,\n       coalesce(b.outer, '')           AS TO_OUTSIDE\nORDER BY a.pin_y, a.pin_x, b.pin_y\n",
+          "width": 24,
+          "height": 5,
+          "x": 0,
+          "y": 13,
+          "type": "table",
+          "selection": {},
+          "settings": {
+            "compact": true,
+            "allowDownload": true,
+            "downloadImageEnabled": true,
+            "defaultPageSize": 10,
+            "description": "One row per arrow currently drawn in the graph. Use the download button to save it as CSV."
+          },
+          "schema": []
+        }
+      ]
+    }
+  ],
+  "parameters": {
+    "neodash_sus_focus": ""
+  },
+  "extensions": {
+    "active": true,
+    "activeReducers": [],
+    "actions": {
+      "active": true
+    }
+  }
+}

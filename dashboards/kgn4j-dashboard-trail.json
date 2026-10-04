@@ -1,0 +1,371 @@
+{
+  "title": "KGN4j - Pathao Pay drill-down + Money Trail",
+  "version": "2.4",
+  "settings": {
+    "pagenumber": 0,
+    "editable": true,
+    "fullscreenEnabled": false,
+    "parameters": {
+      "neodash_focus": "root",
+      "neodash_trace_acc": "",
+      "neodash_trace_credit": "",
+      "neodash_trace_mode": "credit_first"
+    },
+    "downloadImageEnabled": true,
+    "theme": "light"
+  },
+  "pages": [
+    {
+      "title": "Pathao Pay",
+      "reports": [
+        {
+          "id": "kgn4j-breadcrumb",
+          "title": "Where am I",
+          "query": "// CARD - \"Where am I\" (report type: Table, single row)\n// The breadcrumb from Pathao Pay down to the node currently in focus,\n// plus the filter the transactions table is currently applying - so it\n// is always visible why the dataframe holds the rows it holds.\n// Falls back to 'root' when the focus parameter points at a key that no\n// longer exists - see the note in card2_expansion_graph.cypher.\nWITH coalesce($neodash_focus, 'root') AS fk\nOPTIONAL MATCH (stale:Nav {key: fk})\nWITH CASE WHEN stale IS NULL THEN 'root' ELSE fk END AS fk\nMATCH (f:Nav {key: fk})\nMATCH (n:Nav) WHERE f.path STARTS WITH n.path\nWITH f, n ORDER BY n.level\nWITH f, collect(n.name) AS trail\nWITH f, trail,\n     [x IN [\n       CASE WHEN f.f_acc  IS NOT NULL THEN 'STATEMENT_FOR_ACC = ' + f.f_acc  ELSE null END,\n       CASE WHEN f.f_dc   IS NOT NULL THEN 'TXN_TYPE_D_C = '      + f.f_dc   ELSE null END,\n       CASE WHEN f.f_type IS NOT NULL THEN 'TXN_TYPE = '          + f.f_type ELSE null END,\n       CASE WHEN f.f_cp   IS NOT NULL THEN 'TXN_WITH_ACC = '      + f.f_cp   ELSE null END\n     ] WHERE x IS NOT NULL] AS filters\nRETURN f.level AS LEVEL,\n       f.name  AS FOCUS,\n       reduce(s = '', x IN trail   | CASE WHEN s = '' THEN x ELSE s + '  >  '   + x END) AS BREADCRUMB,\n       CASE WHEN size(filters) = 0 THEN 'all rows (sampled)'\n            ELSE reduce(s = '', x IN filters | CASE WHEN s = '' THEN x ELSE s + '  AND  ' + x END)\n       END AS TABLE_FILTER,\n       CASE WHEN f.click = 'root' AND f.key <> 'root'\n            THEN 'end of branch - click to restart' ELSE '' END AS NOTE\n",
+          "width": 24,
+          "height": 2,
+          "x": 0,
+          "y": 0,
+          "type": "table",
+          "selection": {},
+          "settings": {
+            "compact": true,
+            "description": "Path from Pathao Pay to the node in focus, and the filter the table is applying."
+          },
+          "schema": []
+        },
+        {
+          "id": "kgn4j-graph",
+          "title": "Pathao Pay drill-down",
+          "query": "// CARD - \"Pathao Pay drill-down\" (report type: Graph)\n//\n// Parameter: $neodash_focus, set by clicking any node (property `click`).\n// Unset  -> defaults to 'root', so the card opens on the Pathao Pay node.\n//\n// Reveal rule: show the focus node, its ancestors (the breadcrumb back\n// to Pathao Pay) and its direct children. One click = one level deeper:\n//\n//   Pathao Pay -> Customers -> C1..Cn -> Customer-<acc> -> TXN_TYPE_D_C\n//     -> Credit -> P2P / TOP UP / CASH OUT / ... -> Customer-<acc> + END\n//     -> Debit  -> TXN_TYPE -> P2P / TOP UP / ...  -> Customer-<acc> + END\n//\n// The level-10 fan-out stops once the counterparty amounts balance the\n// transaction type's total; the END node marks that point. Clicking END\n// sets focus back to 'root' because its `click` property holds 'root' -\n// which is the cycle.\n//\n// STALE FOCUS. NeoDash keeps `neodash_focus` in browser localStorage, so\n// it survives a rebuild of the tree. Rebuilding renames keys, and a\n// focus pointing at a key that no longer exists would match nothing and\n// draw an EMPTY CARD with no error - which looks exactly like a broken\n// dashboard. The OPTIONAL MATCH below falls back to 'root' in that case,\n// so a stale parameter costs you the drill-down position and nothing else.\n// PAGING AT LEVEL 2. All 38 customer pages hang off the root, but only\n// page 1 is revealed automatically - otherwise Pathao Pay would fan out\n// into 38 near-identical nodes. Pages 2+ are reached only by clicking\n// the page node, whose `click` points at the next page, so the level\n// behaves like one node cycling through tens rather than a fan-out.\nWITH coalesce($neodash_focus, 'root') AS fk\nOPTIONAL MATCH (stale:Nav {key: fk})\nWITH CASE WHEN stale IS NULL THEN 'root' ELSE fk END AS fk\nMATCH (f:Nav {key: fk})\nMATCH (n:Nav)\nWHERE f.path STARTS WITH n.path      // ancestors of the focus, and the focus itself\n   OR (n.parent_key = f.key          // the focus node's direct children ...\n       AND (NOT n:CustomerPage OR n.page = 1))   // ... but only page 1 of them\nWITH collect(DISTINCT n) AS shown\nUNWIND shown AS a\nMATCH p = (a)-[:EXPANDS]->(b)\nWHERE b IN shown\nRETURN p\n",
+          "width": 14,
+          "height": 7,
+          "x": 0,
+          "y": 2,
+          "type": "graph",
+          "selection": {
+            "Provider": "name",
+            "CustomerPage": "name",
+            "Customer": "name",
+            "CustomerAcc": "name",
+            "TxnTypeDC": "name",
+            "CreditNode": "name",
+            "DebitNode": "name",
+            "TxnTypeHub": "name",
+            "TxnTypeNode": "name",
+            "CounterpartyNode": "name",
+            "OthersNode": "name",
+            "EndNode": "name",
+            "EXPANDS": "name",
+            "CounterpartyPage": "name",
+            "PageNav": "name"
+          },
+          "settings": {
+            "layout": "force-directed",
+            "nodeColorScheme": "neodash",
+            "nodeLabelFontSize": 3.2,
+            "relLabelFontSize": 3.0,
+            "showPropertiesOnHover": true,
+            "showPropertiesOnClick": true,
+            "fixNodeAfterDrag": true,
+            "lockable": true,
+            "description": "One click = one level. The counterparty fan-out stops once the amounts balance; click END to return to Pathao Pay.",
+            "actionsRules": [
+              {
+                "condition": "onNodeClick",
+                "field": "Provider",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "CustomerPage",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "Customer",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "CustomerAcc",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "TxnTypeDC",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "CreditNode",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "DebitNode",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "TxnTypeHub",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "TxnTypeNode",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "CounterpartyNode",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "OthersNode",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "EndNode",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "CounterpartyPage",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "PageNav",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "focus"
+              }
+            ],
+            "enableExploration": false,
+            "enableEditing": false,
+            "defaultNodeSize": 3,
+            "defaultRelWidth": 1.6,
+            "pinAllAfterLayout": true
+          },
+          "schema": []
+        },
+        {
+          "id": "kgn4j-transactions",
+          "title": "Transactions",
+          "query": "// CARD - \"Transactions\" (report type: Table)\n// Every column of the source table, exactly as supplied.\n//\n// DYNAMIC: the table follows whichever node is selected in the graph.\n// Each Nav node carries four filter properties written by\n// cypher/03_build_nav_graph.cypher, and this card applies whichever of\n// them are set:\n//\n//   f_acc   STATEMENT_FOR_ACC  - set from the C1..Cn level downwards\n//   f_dc    TXN_TYPE_D_C       - set from Credit / Debit downwards\n//   f_type  TXN_TYPE           - set on P2P / TOP UP / CASH OUT / ...\n//   f_cp    TXN_WITH_ACC       - set on the level-10 Customer-<acc> nodes\n//\n// So: Pathao Pay or Customers -> everything (sampled); C3 -> that\n// customer's rows; Debit -> only their debits; CASH OUT -> only their\n// cash-out debits; Customer-1728... -> only the rows between the two.\n//\n// The LIMIT matters: with millions of rows loaded, an unbounded table\n// card will hang the browser. Raise it if you want - the browser, not\n// Neo4j, is what struggles first.\n// A focus key that no longer exists (after a rebuild renames keys) leaves\n// every filter null, which shows the unfiltered sample - the same thing\n// 'root' shows. See the note in card2_expansion_graph.cypher.\nWITH coalesce($neodash_focus, 'root') AS fk\nOPTIONAL MATCH (f:Nav {key: fk})\nWITH f.f_acc AS f_acc, f.f_dc AS f_dc, f.f_type AS f_type, f.f_cp AS f_cp\nMATCH (t:Transaction)\nWHERE (f_acc  IS NULL OR t.stmt_acc     = f_acc)\n  AND (f_dc   IS NULL OR t.txn_type_d_c = f_dc)\n  AND (f_type IS NULL OR t.txn_type     = f_type)\n  AND (f_cp   IS NULL OR t.with_acc     = f_cp)\nRETURN t.unq_id        AS UNQ_ID,\n       t.from_date     AS FROM_DATE,\n       t.to_date       AS TO_DATE,\n       t.serial_no     AS SerialNo,\n       t.txn_date_time AS TXN_DATE_TIME,\n       t.txn_id        AS TXN_ID,\n       t.txn_type      AS TXN_TYPE,\n       t.account_type  AS ACCOUNT_TYPE,\n       t.stmt_acc      AS STATEMENT_FOR_ACC,\n       t.with_acc      AS TXN_WITH_ACC,\n       t.channel       AS CHANNEL,\n       t.reference     AS REFERENCE,\n       t.txn_type_d_c  AS TXN_TYPE_D_C,\n       t.status        AS STATUS,\n       t.amount        AS TXN_AMT,\n       t.balance_after AS AVAILABLE_BLC_AFTER_TXN,\n       t.txn_with_info AS TXN_WITH_INFO\nORDER BY STATEMENT_FOR_ACC, TXN_DATE_TIME, SerialNo\nLIMIT 2000\n",
+          "width": 10,
+          "height": 7,
+          "x": 14,
+          "y": 2,
+          "type": "table",
+          "selection": {},
+          "settings": {
+            "compact": true,
+            "allowDownload": true,
+            "description": "All 17 source columns. Follows the selected node: customer, debit/credit, transaction type and counterparty."
+          },
+          "schema": []
+        }
+      ]
+    },
+    {
+      "title": "Money Trail",
+      "reports": [
+        {
+          "id": "trail-pick-customer",
+          "title": "1. Pick a customer",
+          "query": "// CARD - \"1. Pick a customer\" (report type: Table)\n// Click a CUSTOMER button to set $neodash_trace_acc.\n// Same C1..Cn numbering as the Pathao Pay drill-down. CREDITS and\n// CREDITED_TK count real statement lines only (:Canon), so the copies\n// duplicated in the source are not counted.\nMATCH (n:Nav:Customer)\nCALL {\n  WITH n\n  MATCH (t:Canon)\n  WHERE t.stmt_acc = n.acc AND t.txn_type_d_c = 'C'\n    AND t.txn_date_time IS NOT NULL   // lets the planner use the canon_acc_dc_time index\n  RETURN count(t) AS credits, sum(t.amount) AS credited\n}\nRETURN n.name                                AS CUSTOMER,\n       n.acc                                 AS ACCOUNT,\n       credits                               AS CREDITS,\n       round(credited, 2)                    AS CREDITED_TK,\n       CASE WHEN n.acc = $neodash_trace_acc THEN '<< selected' ELSE '' END AS SELECTED\nORDER BY n.cust_no\n",
+          "width": 6,
+          "height": 5,
+          "x": 0,
+          "y": 0,
+          "type": "table",
+          "selection": {},
+          "settings": {
+            "compact": true,
+            "description": "Click a CUSTOMER button. Counts are real statement lines (source duplicates removed).",
+            "actionsRules": [
+              {
+                "condition": "Click",
+                "field": "CUSTOMER",
+                "value": "ACCOUNT",
+                "customization": "set variable",
+                "customizationValue": "trace_acc"
+              }
+            ],
+            "defaultPageSize": 10
+          },
+          "schema": []
+        },
+        {
+          "id": "trail-pick-credit",
+          "title": "2. Pick a credit to trace",
+          "query": "// CARD - \"2. Pick a credit to trace\" (report type: Table)\n// Every credit into the selected customer's account, oldest first.\n// Click TRACE to set $neodash_trace_credit (from the hidden __key column).\n// Use the column filter / sort in the table header to find a particular\n// date or amount.\nMATCH (c:Canon)\nWHERE c.stmt_acc = $neodash_trace_acc\n  AND c.txn_type_d_c = 'C'\n  AND c.txn_date_time IS NOT NULL   // lets the planner use the canon_acc_dc_time index\nRETURN 'TRACE'            AS TRACE,\n       c.txn_date_time    AS TXN_DATE_TIME,\n       c.txn_type         AS TXN_TYPE,\n       c.amount           AS TXN_AMT,\n       c.with_acc         AS FROM_ACC,\n       c.balance_after    AS AVAILABLE_BLC_AFTER_TXN,\n       CASE WHEN c.row_key = $neodash_trace_credit THEN '<< tracing' ELSE '' END AS SELECTED,\n       c.row_key          AS __key\nORDER BY TXN_DATE_TIME, c.serial_no\nLIMIT 5000\n",
+          "width": 10,
+          "height": 5,
+          "x": 6,
+          "y": 0,
+          "type": "table",
+          "selection": {},
+          "settings": {
+            "compact": true,
+            "allowDownload": true,
+            "description": "Every credit into the selected customer's account, oldest first. Click TRACE. Use the column filter to find a date or amount.",
+            "actionsRules": [
+              {
+                "condition": "Click",
+                "field": "TRACE",
+                "value": "__key",
+                "customization": "set variable",
+                "customizationValue": "trace_credit"
+              }
+            ],
+            "defaultPageSize": 10
+          },
+          "schema": []
+        },
+        {
+          "id": "trail-rule",
+          "title": "Trace rule",
+          "query": "// CARD - \"Trace rule\" (report type: Table)\n// Click a RULE button to set $neodash_trace_mode.\nUNWIND [\n  {m: 'credit_first', d: 'Debits after the credit are paid from THIS credit first'},\n  {m: 'fifo',         d: 'Money already in the account is spent first, then this credit'}\n] AS r\nRETURN CASE WHEN r.m = coalesce($neodash_trace_mode, 'credit_first') THEN '(*) ' ELSE '( ) ' END + r.m AS RULE,\n       r.d AS MEANING,\n       r.m AS __mode\n",
+          "width": 8,
+          "height": 3,
+          "x": 16,
+          "y": 0,
+          "type": "table",
+          "selection": {},
+          "settings": {
+            "compact": true,
+            "description": "credit_first: debits after the credit are paid from it first. fifo: older balance is spent first.",
+            "actionsRules": [
+              {
+                "condition": "Click",
+                "field": "RULE",
+                "value": "__mode",
+                "customization": "set variable",
+                "customizationValue": "trace_mode"
+              }
+            ]
+          },
+          "schema": []
+        },
+        {
+          "id": "trail-summary",
+          "title": "Where did it terminate?",
+          "query": "// CARD - \"Where did it terminate?\" (report type: Table)\n// One-glance answer for the credit being traced: when and on which debit\n// the credited amount was used up, and how long that took. Same rule as\n// trace_table.cypher.\nWITH coalesce($neodash_trace_credit, '') AS ck,\n     coalesce($neodash_trace_mode, 'credit_first') AS mode\nOPTIONAL MATCH (c:Canon {row_key: ck})\nWHERE c.stmt_acc = coalesce($neodash_trace_acc, '')\nWITH c, mode\nOPTIONAL CALL {   // OPTIONAL: nothing picked yet still returns the hint row\n  WITH c, mode\n  WITH c, mode\n  WHERE c IS NOT NULL\n  WITH c, mode,\n       toInteger(round(c.amount * 1000000)) AS credit_u,\n       toInteger(round((c.balance_after - c.amount) * 1000000)) AS prior_u\n  WITH c, credit_u,\n       CASE WHEN mode = 'fifo' AND prior_u > 0 THEN prior_u ELSE 0 END AS skip_u\n  CALL {\n    WITH c\n    MATCH (d:Canon)\n    WHERE d.stmt_acc = c.stmt_acc\n      AND d.txn_type_d_c = 'D'\n      AND d.txn_date_time >= c.txn_date_time\n      AND (d.txn_date_time > c.txn_date_time OR coalesce(d.serial_no, 0) > coalesce(c.serial_no, 0))\n    WITH d ORDER BY d.txn_date_time, d.serial_no\n    LIMIT 20000\n    RETURN collect(d) AS ds\n  }\n  WITH c, credit_u, skip_u, ds, skip_u + credit_u AS target_u,\n       apoc.coll.runningTotal([x IN ds | toInteger(round(x.amount * 1000000))]) AS cum\n  WITH c, credit_u, skip_u, ds, target_u, cum,\n       coalesce([i IN range(0, size(ds) - 1) WHERE cum[i] >= target_u][0], -1) AS cut\n  WITH c, credit_u, ds, cut,\n       size([i IN range(0, CASE WHEN cut >= 0 THEN cut ELSE size(ds) - 1 END) WHERE cum[i] > skip_u]) AS steps,\n       CASE WHEN size(ds) = 0 THEN 0\n            WHEN cut >= 0 THEN credit_u\n            WHEN cum[size(ds) - 1] > skip_u THEN cum[size(ds) - 1] - skip_u\n            ELSE 0 END AS used_u\n  WITH c, ds, cut, steps, used_u, credit_u,\n       CASE WHEN cut >= 0 THEN ds[cut] ELSE null END AS t\n  WITH c, ds, steps, used_u, credit_u, t,\n       CASE WHEN t IS NULL THEN null\n            ELSE duration.inSeconds(localdatetime(replace(c.txn_date_time, ' ', 'T')),\n                                    localdatetime(replace(t.txn_date_time, ' ', 'T'))).seconds END AS secs\n  RETURN [\n    ['Customer',              c.stmt_acc],\n    ['Credit',                apoc.number.format(c.amount, '#,##0.######') + ' tk  (' + c.txn_type + ')'],\n    ['Credited at',           c.txn_date_time],\n    ['Credited from',         coalesce(c.with_acc, '-')],\n    ['Status',                CASE WHEN t IS NOT NULL THEN 'TERMINATED'\n                                   WHEN size(ds) >= 20000 THEN 'NOT TERMINATED within 20,000 debits'\n                                   ELSE 'NOT TERMINATED - still unspent at end of data' END],\n    ['Terminated at',         coalesce(t.txn_date_time, '-')],\n    ['Terminating debit',     CASE WHEN t IS NULL THEN '-'\n                                   ELSE t.txn_type + '  ' + apoc.number.format(t.amount, '#,##0.######') +\n                                        ' tk  to ' + coalesce(t.with_acc, '-') END],\n    ['Debits that used it',   toString(steps)],\n    ['Time to terminate',     CASE WHEN secs IS NULL THEN '-'\n                                   ELSE toString(secs / 86400) + ' d ' + toString((secs % 86400) / 3600) + ' h ' +\n                                        toString((secs % 3600) / 60) + ' m ' + toString(secs % 60) + ' s' END],\n    ['Spent from this credit', apoc.number.format(used_u / 1000000.0, '#,##0.######') + ' tk'],\n    ['Left unspent',          apoc.number.format((credit_u - used_u) / 1000000.0, '#,##0.######') + ' tk']\n  ] AS rows\n}\nWITH mode, CASE WHEN c IS NULL\n                THEN [['Status', 'Pick a customer, then click TRACE on one of their credits']]\n                ELSE rows END AS rows\nUNWIND rows + [['Rule', mode]] AS r\nRETURN r[0] AS ITEM, r[1] AS VALUE\n",
+          "width": 8,
+          "height": 10,
+          "x": 16,
+          "y": 3,
+          "type": "table",
+          "selection": {},
+          "settings": {
+            "compact": true,
+            "wrapContent": true,
+            "description": "When and on which debit the credited amount was fully used.",
+            "defaultPageSize": 25
+          },
+          "schema": []
+        },
+        {
+          "id": "trail-graph",
+          "title": "Money trail",
+          "query": "// CARD - \"Money trail\" (report type: Graph, layout tree-top-down)\n//\n// Same rule and parameters as trace_table.cypher - read that file's\n// header for the full explanation. This card draws the result as one\n// vertical chain, read top to bottom:\n//\n//   From <sender>                      who paid the credit in\n//     | credited 500 tk\n//   CREDIT 500 tk - P2P - 2024-04-07 17:59\n//     | uses 200 tk - left 300 tk\n//   #1 2024-04-07 19:53 - P2P 200 tk\n//     | uses 250 tk - left 50 tk\n//   #2 ...\n//     | uses 50 tk - left 0 tk\n//   #3 2024-04-08 10:30 - CASH OUT 100 tk\n//     |\n//   TERMINATED 2024-04-08 10:30:47     the debit that used the last paisa\n//\n// READABILITY. A large credit can take hundreds of debits to use up. The\n// chain always shows the first 6 and the last 6 steps - the last one being\n// the terminating debit - and folds everything in between into one\n// \"... n more debits\" node carrying their total. The step table below the\n// graph lists every step.\n//\n// Nothing here is stored: the chain is built from APOC virtual nodes on\n// each run, so it never touches the database.\nWITH coalesce($neodash_trace_credit, '') AS ck,\n     coalesce($neodash_trace_mode, 'credit_first') AS mode\nMATCH (c:Canon {row_key: ck})\nWHERE c.stmt_acc = coalesce($neodash_trace_acc, '')   // switching customer clears the trail\nWITH c, mode,\n     toInteger(round(c.amount * 1000000)) AS credit_u,\n     toInteger(round((c.balance_after - c.amount) * 1000000)) AS prior_u\nWITH c, mode, credit_u,\n     CASE WHEN mode = 'fifo' AND prior_u > 0 THEN prior_u ELSE 0 END AS skip_u\nCALL {\n  WITH c\n  MATCH (d:Canon)\n  WHERE d.stmt_acc = c.stmt_acc\n    AND d.txn_type_d_c = 'D'\n    AND d.txn_date_time >= c.txn_date_time\n    AND (d.txn_date_time > c.txn_date_time OR coalesce(d.serial_no, 0) > coalesce(c.serial_no, 0))\n  WITH d ORDER BY d.txn_date_time, d.serial_no\n  LIMIT 20000\n  RETURN collect(d) AS ds\n}\nWITH c, mode, credit_u, skip_u, ds, skip_u + credit_u AS target_u,\n     apoc.coll.runningTotal([x IN ds | toInteger(round(x.amount * 1000000))]) AS cum\nWITH c, mode, credit_u, skip_u, target_u, ds, cum,\n     coalesce([i IN range(0, size(ds) - 1) WHERE cum[i] >= target_u][0], -1) AS cut\nWITH c, mode, credit_u, ds, cut,\n     [i IN range(0, CASE WHEN cut >= 0 THEN cut ELSE size(ds) - 1 END) |\n        {d: ds[i], n: i,\n         used: (CASE WHEN cum[i] < target_u THEN cum[i] ELSE target_u END)\n             - (CASE WHEN i > 0 AND cum[i - 1] > skip_u THEN cum[i - 1] ELSE skip_u END),\n         left: target_u - (CASE WHEN cum[i] < target_u THEN cum[i] ELSE target_u END)}\n     ] AS all_steps\nWITH c, mode, credit_u, ds, cut,\n     [s IN all_steps WHERE s.used > 0] AS steps\nWITH c, mode, credit_u, ds, cut, steps,\n     reduce(u = 0, s IN steps | u + s.used) AS used_total_u\n// Fold the middle of a long chain into one node.\nWITH c, mode, credit_u, ds, cut, steps, used_total_u,\n     CASE WHEN size(steps) <= 13\n          THEN [k IN range(0, size(steps) - 1) | {kind: 'step', k: k, s: steps[k]}]\n          ELSE [k IN range(0, 5) | {kind: 'step', k: k, s: steps[k]}]\n             + [{kind: 'gap', k: 6, s: null,\n                 cnt: size(steps) - 12,\n                 amt: reduce(u = 0, s IN steps[6 .. size(steps) - 6] | u + s.used),\n                 left: steps[size(steps) - 7].left}]\n             + [k IN range(size(steps) - 6, size(steps) - 1) | {kind: 'step', k: k, s: steps[k]}]\n     END AS shown\n\n// --- the nodes ------------------------------------------------------\nCALL apoc.create.vNode(['TraceSource'], {\n  name: 'From ' + coalesce(c.with_acc, '?'),\n  account: c.with_acc\n}) YIELD node AS src\nCALL apoc.create.vNode(['TraceCredit'], {\n  name: 'CREDIT ' + apoc.number.format(c.amount, '#,##0.######') + ' tk  -  ' + c.txn_type +\n        '  -  ' + substring(c.txn_date_time, 0, 16),\n  customer: c.stmt_acc,\n  amount: c.amount,\n  txn_type: c.txn_type,\n  txn_date_time: c.txn_date_time,\n  txn_id: c.txn_id,\n  balance_after: c.balance_after,\n  mode: mode\n}) YIELD node AS cr\nCALL apoc.create.vRelationship(src, 'CREDITED', {\n  name: 'credited ' + apoc.number.format(c.amount, '#,##0.######') + ' tk',\n  amount: c.amount\n}, cr) YIELD rel AS r0\n\nCALL {\n  WITH shown\n  UNWIND shown AS x\n  CALL apoc.create.vNode(\n    [CASE x.kind WHEN 'gap' THEN 'TraceGap' ELSE 'TraceStep' END],\n    CASE x.kind\n      WHEN 'gap' THEN {\n        name: '... ' + toString(x.cnt) + ' more debits  -  ' +\n              apoc.number.format(x.amt / 1000000.0, '#,##0.######') + ' tk from this credit',\n        debits: x.cnt,\n        used_from_credit: x.amt / 1000000.0,\n        credit_left_after: x.left / 1000000.0\n      }\n      ELSE {\n        name: '#' + toString(x.k + 1) + '  ' + substring(x.s.d.txn_date_time, 0, 16) + '  -  ' +\n              x.s.d.txn_type + '  ' + apoc.number.format(x.s.d.amount, '#,##0.######') + ' tk',\n        step: x.k + 1,\n        txn_date_time: x.s.d.txn_date_time,\n        txn_type: x.s.d.txn_type,\n        to_account: x.s.d.with_acc,\n        debit_amount: x.s.d.amount,\n        used_from_credit: x.s.used / 1000000.0,\n        credit_left_after: x.s.left / 1000000.0,\n        balance_after: x.s.d.balance_after,\n        txn_id: x.s.d.txn_id\n      }\n    END\n  ) YIELD node\n  RETURN collect({node: node, x: x}) AS chain\n}\n\n// --- the end of the trail -------------------------------------------\nWITH c, cr, src, r0, ds, cut, steps, chain, credit_u, used_total_u,\n     CASE WHEN cut >= 0 THEN steps[size(steps) - 1].d ELSE null END AS term\nCALL apoc.create.vNode(['TraceEnd'], CASE\n  WHEN term IS NOT NULL THEN {\n    name: 'TERMINATED  ' + term.txn_date_time + '  (step ' + toString(size(steps)) + ')',\n    terminated: true,\n    at: term.txn_date_time,\n    by_txn_type: term.txn_type,\n    to_account: term.with_acc,\n    steps: size(steps)\n  }\n  WHEN size(ds) >= 20000 THEN {\n    name: 'NOT TERMINATED within 20,000 debits  -  ' +\n          apoc.number.format((credit_u - used_total_u) / 1000000.0, '#,##0.######') + ' tk left',\n    terminated: false,\n    left: (credit_u - used_total_u) / 1000000.0\n  }\n  ELSE {\n    name: 'NOT TERMINATED  -  ' +\n          apoc.number.format((credit_u - used_total_u) / 1000000.0, '#,##0.######') +\n          ' tk still unspent at end of data',\n    terminated: false,\n    left: (credit_u - used_total_u) / 1000000.0\n  }\nEND) YIELD node AS endn\n\n// --- the edges: credit -> step 1 -> step 2 -> ... -> end -------------\nWITH src, cr, r0, endn, chain,\n     [cr] + [x IN chain | x.node] AS froms,\n     [x IN chain | x] AS tos\nCALL {\n  WITH froms, tos\n  UNWIND range(0, size(tos) - 1) AS i\n  WITH froms[i] AS a, tos[i] AS t\n  CALL apoc.create.vRelationship(a, 'SPENT', {\n    name: CASE t.x.kind\n            WHEN 'gap' THEN 'uses ' + apoc.number.format(t.x.amt / 1000000.0, '#,##0.######') +\n                            ' tk  -  left ' + apoc.number.format(t.x.left / 1000000.0, '#,##0.######') + ' tk'\n            ELSE 'uses ' + apoc.number.format(t.x.s.used / 1000000.0, '#,##0.######') +\n                 ' tk  -  left ' + apoc.number.format(t.x.s.left / 1000000.0, '#,##0.######') + ' tk'\n          END\n  }, t.node) YIELD rel\n  RETURN collect(rel) AS rels\n}\nWITH src, cr, r0, endn, rels, [x IN chain | x.node] AS step_nodes,\n     CASE WHEN size(chain) = 0 THEN cr ELSE chain[size(chain) - 1].node END AS last\nCALL apoc.create.vRelationship(last, 'ENDS', {\n  name: CASE WHEN endn.terminated THEN '0 tk left' ELSE 'trail ends' END\n}, endn) YIELD rel AS rEnd\n// every node must be returned, not only the relationships between them -\n// NeoDash cannot draw a relationship whose end node is missing\nRETURN src, cr, step_nodes, endn, r0, rels, rEnd\n",
+          "width": 16,
+          "height": 8,
+          "x": 0,
+          "y": 5,
+          "type": "graph",
+          "selection": {
+            "TraceSource": "name",
+            "TraceCredit": "name",
+            "TraceStep": "name",
+            "TraceGap": "name",
+            "TraceEnd": "name",
+            "CREDITED": "name",
+            "SPENT": "name",
+            "ENDS": "name"
+          },
+          "settings": {
+            "layout": "tree-top-down",
+            "graphDepthSep": 30,
+            "nodeColorScheme": "category10",
+            "nodeLabelFontSize": 6.5,
+            "relLabelFontSize": 5,
+            "defaultNodeSize": 6,
+            "defaultRelWidth": 1.5,
+            "showPropertiesOnHover": true,
+            "showPropertiesOnClick": true,
+            "fixNodeAfterDrag": true,
+            "pinAllAfterLayout": true,
+            "lockable": true,
+            "enableExploration": false,
+            "enableEditing": false,
+            "description": "Credit at the top, each debit that used it below, in date-time order. The last node says where the credited amount terminated."
+          },
+          "schema": []
+        },
+        {
+          "id": "trail-steps",
+          "title": "Money trail - every step",
+          "query": "// CARD - \"Money trail - step by step\" (report type: Table)\n//\n// Parameters (set by clicking in the other cards on the Money Trail page):\n//   $neodash_trace_credit  row_key of the credit being traced\n//   $neodash_trace_mode    'credit_first' (default) or 'fifo'\n//\n// THE RULE. Take one credit, e.g. 500 tk into a customer's account. Walk\n// that customer's debits forward in date-time order - P2P, TOP UP, CASH\n// OUT, PAYMENT, service fees, everything that left the account - and\n// charge each one against the credit until nothing is left. The debit\n// that takes the balance of the credit to zero is where the amount\n// TERMINATES.\n//\n//   credit_first  every debit after the credit is paid out of THIS credit\n//                 first. What you asked for: \"after the credited amount,\n//                 where did the user debit it\".\n//   fifo          money already in the account before the credit is spent\n//                 first (first in, first out); this credit starts being\n//                 used only once that older balance is gone.\n//\n// EXACTNESS. Amounts are converted to integer micro-taka (x 1,000,000)\n// before any adding up, so there is no floating-point drift: the trail\n// does not stop while even 0.0001 tk of the credit is left, and stops on\n// exactly the debit that uses the last of it.\n//\n// Reads :Canon rows only (see cypher/05_build_trace_layer.cypher) so the\n// copies duplicated in the source extract are not counted 414 times.\nWITH coalesce($neodash_trace_credit, '') AS ck,\n     coalesce($neodash_trace_mode, 'credit_first') AS mode,\n     20000 AS max_debits   // keep in step with the LIMIT below\nMATCH (c:Canon {row_key: ck})\nWHERE c.stmt_acc = coalesce($neodash_trace_acc, '')   // switching customer clears the trail\nWITH c, mode, max_debits,\n     toInteger(round(c.amount * 1000000)) AS credit_u,\n     toInteger(round((c.balance_after - c.amount) * 1000000)) AS prior_u\nWITH c, mode, max_debits, credit_u,\n     CASE WHEN mode = 'fifo' AND prior_u > 0 THEN prior_u ELSE 0 END AS skip_u\nCALL {\n  WITH c\n  MATCH (d:Canon)\n  WHERE d.stmt_acc = c.stmt_acc\n    AND d.txn_type_d_c = 'D'\n    AND d.txn_date_time >= c.txn_date_time\n    AND (d.txn_date_time > c.txn_date_time OR coalesce(d.serial_no, 0) > coalesce(c.serial_no, 0))\n  WITH d ORDER BY d.txn_date_time, d.serial_no\n  LIMIT 20000\n  RETURN collect(d) AS ds\n}\nWITH c, mode, credit_u, skip_u, ds, skip_u + credit_u AS target_u,\n     apoc.coll.runningTotal([x IN ds | toInteger(round(x.amount * 1000000))]) AS cum\nWITH c, mode, credit_u, skip_u, target_u, ds, cum,\n     coalesce([i IN range(0, size(ds) - 1) WHERE cum[i] >= target_u][0], -1) AS cut\nUNWIND range(0, CASE WHEN cut >= 0 THEN cut ELSE size(ds) - 1 END) AS i\nWITH c, mode, credit_u, skip_u, target_u, ds, cum, cut, i,\n     CASE WHEN i = 0 THEN 0 ELSE cum[i - 1] END AS before_u\nWITH c, mode, credit_u, target_u, ds[i] AS d, i, cut,\n     (CASE WHEN cum[i] < target_u THEN cum[i] ELSE target_u END)\n       - (CASE WHEN before_u > skip_u THEN before_u ELSE skip_u END) AS used_u,\n     target_u - (CASE WHEN cum[i] < target_u THEN cum[i] ELSE target_u END) AS left_u\nWHERE used_u > 0\nWITH c, d, i, cut, used_u, left_u\nORDER BY i\nWITH c, collect({d: d, i: i, cut: cut, used: used_u, left: left_u}) AS steps\nUNWIND range(0, size(steps) - 1) AS k\nWITH c, steps[k] AS s, k\nRETURN k + 1                                          AS STEP,\n       s.d.txn_date_time                              AS TXN_DATE_TIME,\n       s.d.txn_type                                   AS TXN_TYPE,\n       s.d.with_acc                                   AS TXN_WITH_ACC,\n       s.d.amount                                     AS DEBIT_AMT,\n       s.used / 1000000.0                             AS FROM_THIS_CREDIT,\n       s.left / 1000000.0                             AS CREDIT_LEFT_AFTER,\n       CASE WHEN s.i = s.cut THEN 'TERMINATED HERE' ELSE '' END AS STATUS,\n       s.d.balance_after                              AS AVAILABLE_BLC_AFTER_TXN,\n       s.d.txn_id                                     AS TXN_ID,\n       s.d.channel                                    AS CHANNEL,\n       s.d.reference                                  AS REFERENCE\nORDER BY STEP\n",
+          "width": 24,
+          "height": 6,
+          "x": 0,
+          "y": 13,
+          "type": "table",
+          "selection": {},
+          "settings": {
+            "compact": true,
+            "allowDownload": true,
+            "description": "Every debit that used part of the credit, in date-time order. FROM_THIS_CREDIT is exact to 0.000001 tk.",
+            "defaultPageSize": 25
+          },
+          "schema": []
+        }
+      ]
+    }
+  ],
+  "parameters": {
+    "neodash_focus": "root",
+    "neodash_trace_acc": "",
+    "neodash_trace_credit": "",
+    "neodash_trace_mode": "credit_first"
+  },
+  "extensions": {
+    "active": true,
+    "activeReducers": [],
+    "actions": {
+      "active": true
+    }
+  }
+}

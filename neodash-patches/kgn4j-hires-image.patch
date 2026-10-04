@@ -1,0 +1,50 @@
+diff --git a/src/chart/ChartUtils.ts b/src/chart/ChartUtils.ts
+index 45b0b14..afcecfd 100644
+--- a/src/chart/ChartUtils.ts
++++ b/src/chart/ChartUtils.ts
+@@ -247,12 +247,39 @@ export function replaceDashboardParametersInString(str, parameters) {
+ export const downloadComponentAsImage = (ref) => {
+   const element = ref.current;
+ 
+-  domtoimage.toPng(element, { bgcolor: 'white' }).then((dataUrl) => {
+-    const link = document.createElement('a');
+-    link.download = 'image.png';
+-    link.href = dataUrl;
+-    link.click();
+-  });
++  // KGN4j patch: render at a higher pixel density so the image isn't pixelated.
++  // The element is drawn scaled-up, capped so the PNG stays within the browser's
++  // canvas limits (very tall dashboards get a smaller scale instead of failing).
++  const width = element.scrollWidth;
++  const height = element.scrollHeight;
++  const MAX_SIDE = 16000;
++  const MAX_AREA = 120_000_000;
++  const scale = Math.max(
++    1,
++    Math.min(3, MAX_SIDE / width, MAX_SIDE / height, Math.sqrt(MAX_AREA / (width * height)))
++  );
++
++  domtoimage
++    .toPng(element, {
++      bgcolor: 'white',
++      width: Math.floor(width * scale),
++      height: Math.floor(height * scale),
++      style: {
++        transform: `scale(${scale})`,
++        transformOrigin: 'top left',
++        width: `${width}px`,
++        height: `${height}px`,
++      },
++    })
++    .then((dataUrl) => {
++      const link = document.createElement('a');
++      link.download = 'image.png';
++      link.href = dataUrl;
++      link.click();
++    })
++    .catch((error) => {
++      console.error('Image download failed', error);
++    });
+ };
+ 
+ import { QueryResult, Record as Neo4jRecord } from 'neo4j-driver';

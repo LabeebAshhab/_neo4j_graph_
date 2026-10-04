@@ -48,6 +48,7 @@ No custom UI. Stock NeoDash, stock Neo4j Community, stock pgAdmin.
 | `docs/DATA_MODEL.md` | the graph model and why the chain is precomputed |
 | `docs/NEODASH_CARDS.md` | wiring each card by hand in the NeoDash UI |
 | `docs/TROUBLESHOOTING.md` | the errors you will actually hit |
+| `docs/SUSPECT_NETWORK.md` | **separate pipeline**: the suspected-wallet sheet → `cypher/suspect/` → `dashboards/kgn4j-dashboard-suspect.json` |
 
 ---
 

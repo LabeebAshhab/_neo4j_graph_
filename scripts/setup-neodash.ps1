@@ -41,6 +41,37 @@ if (-not (Test-Path $NeodashDir)) {
 
 Push-Location $NeodashDir
 try {
+    # KGN4j patches, applied in this order (the second builds on the first):
+    #   kgn4j-neodash.patch        graph re-layout/fit + pin-all-after-layout,
+    #                              and a table "rows per page on load" setting
+    #   kgn4j-suspect-graph.patch  a second node caption drawn outside the
+    #                              node, node shapes, fixed positions from
+    #                              pin_x / pin_y, zoom-to-what-you-opened (Suspect Network)
+    #   kgn4j-hires-image.patch    camera buttons save the image at up to 3x
+    #                              resolution instead of screen resolution
+    # Every setting is opt-in per card, so dashboards that do not set them
+    # behave exactly as stock NeoDash. Each patch is applied once; skipped
+    # if already in place.
+    foreach ($Name in @('kgn4j-neodash.patch', 'kgn4j-suspect-graph.patch', 'kgn4j-hires-image.patch')) {
+        $Patch = Join-Path $PSScriptRoot "..\neodash-patches\$Name"
+        if (-not (Test-Path $Patch)) { continue }
+        # With ErrorActionPreference=Stop, Windows PowerShell turns git's
+        # stderr into a terminating error even with 2>$null, so relax it
+        # around the checks and rely on the exit codes instead.
+        $ErrorActionPreference = 'Continue'
+        git apply --check $Patch 2>&1 | Out-Null
+        $CanApply = ($LASTEXITCODE -eq 0)
+        $ErrorActionPreference = 'Stop'
+        # Not applicable forward means it is already in place. A reverse
+        # check is not reliable here: a later patch edits the same lines,
+        # so an earlier patch no longer reverses cleanly once it is applied.
+        if ($CanApply) {
+            Write-Host "Applying $Name ..." -ForegroundColor Cyan
+            git apply $Patch
+            if ($LASTEXITCODE -ne 0) { throw "Could not apply neodash-patches\$Name." }
+        }
+    }
+
     if (-not (Test-Path (Join-Path $NeodashDir 'node_modules'))) {
         Write-Host 'Installing dependencies (this takes a few minutes) ...' -ForegroundColor Cyan
         # NeoDash pins some peer deps loosely; --legacy-peer-deps avoids

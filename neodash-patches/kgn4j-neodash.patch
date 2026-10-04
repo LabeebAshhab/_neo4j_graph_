@@ -1,0 +1,114 @@
+diff --git a/src/chart/graph/GraphChart.tsx b/src/chart/graph/GraphChart.tsx
+index ee40475..ef076eb 100644
+--- a/src/chart/graph/GraphChart.tsx
++++ b/src/chart/graph/GraphChart.tsx
+@@ -197,6 +197,7 @@ const NeoGraphChart = (props: GraphChartProps) => {
+       showPropertyInspector: inspectModalOpen,
+       setPropertyInspectorOpen: setInspectModalOpen,
+       fixNodeAfterDrag: settings.fixNodeAfterDrag,
++      pinAllAfterLayout: settings.pinAllAfterLayout,
+       handleExpand: handleExpand,
+       setGlobalParameter: props.setGlobalParameter,
+       setPageNumber: props.setPageNumber,
+@@ -223,6 +224,13 @@ const NeoGraphChart = (props: GraphChartProps) => {
+   // When data is refreshed, rebuild the visualization data.
+   useEffect(() => {
+     generateVisualizationDataGraph(props.records, chartProps);
++    // KGN4j patch: after the first layout NeoDash drops cooldownTicks to 0,
++    // so later results were drawn without any layout at all. Give every new
++    // result a full layout and a fit-to-window.
++    if (settings.pinAllAfterLayout) {
++      setCooldownTicks(100);
++      setRecenterAfterEngineStop(true);
++    }
+   }, [props.records]);
+ 
+   return (
+diff --git a/src/chart/graph/GraphChartVisualization.ts b/src/chart/graph/GraphChartVisualization.ts
+index 20cdce9..de0d09a 100644
+--- a/src/chart/graph/GraphChartVisualization.ts
++++ b/src/chart/graph/GraphChartVisualization.ts
+@@ -124,6 +124,7 @@ export interface GraphChartVisualizationProps {
+     setPropertyInspectorOpen: React.Dispatch<React.SetStateAction<boolean>>;
+     createNotification: ((title: string, message: string) => void) | undefined;
+     fixNodeAfterDrag: boolean;
++    pinAllAfterLayout?: boolean;
+     onNodeClick: (node) => void;
+     onNodeRightClick: (node, event) => void;
+     onRelationshipClick: (rel) => void;
+diff --git a/src/chart/graph/GraphChartVisualizationBase.tsx b/src/chart/graph/GraphChartVisualizationBase.tsx
+index 7dbf610..5ee7b50 100644
+--- a/src/chart/graph/GraphChartVisualizationBase.tsx
++++ b/src/chart/graph/GraphChartVisualizationBase.tsx
+@@ -47,8 +47,23 @@ export const NeoGraphChartVisualizationBase = (props: GraphChartVisualizationPro
+       cooldownTicks={props.engine.cooldownTicks}
+       onEngineStop={() => {
+         props.engine.setCooldownTicks(props.config.cooldownAfterengineStop);
++        // KGN4j patch: once the layout settles, pin every node where it is.
++        // With everything pinned, dragging a node moves that node only - the
++        // rest stay put instead of being pulled along by the simulation.
++        if (props.interactivity.pinAllAfterLayout) {
++          props.data.nodes.forEach((node: any) => {
++            if (node.x !== undefined && node.y !== undefined) {
++              node.fx = node.x;
++              node.fy = node.y;
++            }
++          });
++        }
+         if (props.engine.recenterAfterEngineStop) {
+-          fgRef.current.zoomToFit(400);
++          if (props.interactivity.pinAllAfterLayout) {
++            fgRef.current.zoomToFit(400, 30);
++          } else {
++            fgRef.current.zoomToFit(400);
++          }
+           props.engine.setRecenterAfterEngineStop(false);
+         }
+       }}
+diff --git a/src/chart/table/TableChart.tsx b/src/chart/table/TableChart.tsx
+index fbdc542..62f7ae5 100644
+--- a/src/chart/table/TableChart.tsx
++++ b/src/chart/table/TableChart.tsx
+@@ -220,7 +220,8 @@ export const NeoTableChart = (props: ChartProps) => {
+     initialState: {
+       pagination: {
+         paginationModel: {
+-          pageSize: 5,
++          // KGN4j patch: optional per-card starting page size (default unchanged)
++          pageSize: props.settings && props.settings.defaultPageSize ? props.settings.defaultPageSize : 5,
+           pageIndex: 0,
+         },
+       },
+diff --git a/src/config/ReportConfig.tsx b/src/config/ReportConfig.tsx
+index be72ffb..c97fce0 100644
+--- a/src/config/ReportConfig.tsx
++++ b/src/config/ReportConfig.tsx
+@@ -52,6 +52,13 @@ const _REPORT_TYPES = {
+         values: [true, false],
+         default: false,
+       },
++      // KGN4j patch: rows shown per page when the table first loads
++      defaultPageSize: {
++        label: 'Rows per page on load',
++        type: SELECTION_TYPES.LIST,
++        values: [5, 10, 25, 50, 100],
++        default: 5,
++      },
+       columnWidthsType: {
+         label: 'Column Widths Specification',
+         type: SELECTION_TYPES.LIST,
+@@ -218,6 +225,14 @@ const _REPORT_TYPES = {
+         values: [true, false],
+         default: true,
+       },
++      // KGN4j patch: re-run the layout and fit the window on every new result,
++      // then pin every node so dragging one moves only that one.
++      pinAllAfterLayout: {
++        label: 'Re-layout on new data, then pin all nodes (drag moves one node only)',
++        type: SELECTION_TYPES.LIST,
++        values: [true, false],
++        default: false,
++      },
+       drilldownLink: {
+         label: 'Drilldown Icon Link',
+         type: SELECTION_TYPES.TEXT,
