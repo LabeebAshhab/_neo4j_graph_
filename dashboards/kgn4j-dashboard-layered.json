@@ -1,0 +1,212 @@
+{
+  "title": "KGN4j - Layered Trail",
+  "version": "2.4",
+  "settings": {
+    "pagenumber": 0,
+    "editable": true,
+    "fullscreenEnabled": true,
+    "parameters": {
+      "neodash_lyr_focus": ""
+    },
+    "downloadImageEnabled": true,
+    "theme": "light"
+  },
+  "pages": [
+    {
+      "title": "Layered Trail",
+      "reports": [
+        {
+          "id": "lyr-legend",
+          "title": "What the shapes and colours mean",
+          "query": "// CARD - \"What the shapes and colours mean\" (report type: Graph)\n// The legend nodes built in cypher/layered/01_build_layered_graph.cypher section 2.9 - drawn with\n// exactly the shapes and colours the main graph uses.\nMATCH (l:LLegend)\nRETURN l\nORDER BY l.rank\n",
+          "width": 5,
+          "height": 7,
+          "x": 0,
+          "y": 0,
+          "type": "graph",
+          "selection": {
+            "LLegend": "name"
+          },
+          "settings": {
+            "backgroundColor": "#FAFAF7",
+            "defaultRelColor": "#C3CBD3",
+            "relLabelColor": "#56616C",
+            "nodeLabelColor": "#2F3B45",
+            "layout": "force-directed",
+            "nodeColorProp": "color",
+            "nodeSizeProp": "size",
+            "nodeOuterLabelProp": "outer",
+            "nodeLabelFontSize": 9,
+            "showPropertiesOnHover": false,
+            "showPropertiesOnClick": false,
+            "enableExploration": false,
+            "enableEditing": false,
+            "hideSelections": true,
+            "downloadImageEnabled": true,
+            "description": "Hexagon = the source. Circle = a person who paid others on (click to open them); square = a person who paid nobody on, the trail ends there. Colour = the layer they received the money in; the number inside is the traced amount. Orange arrow = part of that transfer is more than the person received, so it is not counted."
+          },
+          "schema": []
+        },
+        {
+          "id": "lyr-graph",
+          "title": "Layered money trail",
+          "query": "// CARD - \"Layered money trail\" (report type: Graph)\n// Opens one level per click.\n//   start                 -> every source and the person it paid in layer 1\n//   click a person        -> also the people that person paid by P2P\n//   click one of those    -> the path stays open, the next level opens\n//   click a LAYER header  -> everything closes again\n// A node is drawn when it is a source, a layer-1 person, or when its\n// parent is on the clicked node's `chain` (the clicked node and the\n// people before it). A stale / unknown focus draws the start.\nWITH coalesce($neodash_lyr_focus, '') AS fk\nOPTIONAL MATCH (f:LNet {key: fk})\nWITH coalesce(f.chain, []) AS chain\nMATCH (n:LNet)\nWHERE n:LHeader OR n.parent_key IS NULL OR n.layer = 1 OR n.parent_key IN chain\nWITH collect(n) AS shown\nUNWIND shown AS a\nOPTIONAL MATCH p = (a)-[:LFLOW]->(b)\nWHERE b IN shown\nRETURN a, p\n",
+          "width": 19,
+          "height": 7,
+          "x": 5,
+          "y": 0,
+          "type": "graph",
+          "selection": {
+            "LNet": "name",
+            "LSource": "name",
+            "LAccount": "name",
+            "LExit": "name",
+            "LHeader": "name",
+            "LFLOW": "name"
+          },
+          "settings": {
+            "backgroundColor": "#FAFAF7",
+            "defaultRelColor": "#C3CBD3",
+            "relLabelColor": "#56616C",
+            "nodeLabelColor": "#2F3B45",
+            "layout": "force-directed",
+            "nodeColorProp": "color",
+            "nodeSizeProp": "size",
+            "relColorProp": "color",
+            "relWidthProp": "width",
+            "nodeOuterLabelProp": "outer",
+            "nodeLabelFontSize": 9,
+            "relLabelFontSize": 7,
+            "showPropertiesOnHover": true,
+            "showPropertiesOnClick": true,
+            "fixNodeAfterDrag": true,
+            "pinAllAfterLayout": true,
+            "lockable": true,
+            "enableExploration": false,
+            "enableEditing": false,
+            "hideSelections": true,
+            "downloadImageEnabled": true,
+            "fullscreenEnabled": true,
+            "description": "P2P only. Starts with each source and the person it paid. Click a person to see who they paid next (one layer per click); the path stays open. Click a LAYER header to close everything. Arrow captions: traced amount, and in brackets the minus (orange arrows).",
+            "actionsRules": [
+              {
+                "condition": "onNodeClick",
+                "field": "LNet",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "lyr_focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "LSource",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "lyr_focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "LAccount",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "lyr_focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "LExit",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "lyr_focus"
+              },
+              {
+                "condition": "onNodeClick",
+                "field": "LHeader",
+                "value": "click",
+                "customization": "set variable",
+                "customizationValue": "lyr_focus"
+              }
+            ]
+          },
+          "schema": []
+        },
+        {
+          "id": "lyr-selected",
+          "title": "Selected",
+          "query": "// CARD - \"Selected\" (report type: Table, single row)\n// The clicked person: the traced money they received, how many people\n// they paid, what they sent, the minus, and what they kept.\nWITH coalesce($neodash_lyr_focus, '') AS fk\nOPTIONAL MATCH (f:LNet {key: fk})\nRETURN CASE WHEN f IS NULL OR f:LHeader THEN 'nothing clicked' ELSE f.role END AS NODE,\n       coalesce(f.acc, '')                AS ACCOUNT,\n       f.tag                              AS TXN_SL_TAG,\n       f.layer                            AS LAYER,\n       round(f.traced_in, 2)              AS TRACED_IN,\n       round(f.received, 2)               AS RECEIVED_P2P,\n       f.pays                             AS PAYS_PEOPLE,\n       round(f.sent, 2)                   AS SENT_P2P,\n       round(f.traced_out, 2)             AS TRACED_OUT,\n       round(f.excess, 2)                 AS MINUS_NOT_TRACED,\n       round(f.kept, 2)                   AS KEPT,\n       CASE WHEN size(coalesce(f.also_in_layers, [])) = 0 THEN ''\n            ELSE reduce(s = '', l IN f.also_in_layers | CASE WHEN s = '' THEN '' ELSE s + ', ' END + toString(l))\n       END                                AS ALSO_IN_LAYERS\n",
+          "width": 24,
+          "height": 2,
+          "x": 0,
+          "y": 7,
+          "type": "table",
+          "selection": {},
+          "settings": {
+            "compact": true,
+            "wrapContent": true
+          },
+          "schema": []
+        },
+        {
+          "id": "lyr-reconcile",
+          "title": "Does it add up? (kept by people = layer-1 amount)",
+          "query": "// CARD - \"Does it add up?\" (report type: Table)\n// Per trail: the layer-1 P2P amount, and the traced money every person\n// kept after the last layer. KEPT equals START (CHECK = OK) - the\n// \"after 5 layers it matches the first transfer\" check. The non-P2P\n// rows left out of the trace are counted for reference.\nMATCH (s:LSource)\nWITH s.tag AS tag, collect(s.acc) AS sources, sum(s.sent) AS start\nMATCH (n:LAccount {tag: tag})\nWITH tag, sources, start, max(n.layer) AS layers, count(n) AS people, sum(n.kept) AS kept\nCALL {\n  WITH tag\n  MATCH (r:LyrTxn {tag: tag, p2p: false})\n  RETURN count(r) AS skipped, coalesce(sum(r.amount), 0.0) AS skipped_amt\n}\nRETURN tag AS TXN_SL_TAG,\n       reduce(s = '', a IN sources | CASE WHEN s = '' THEN a ELSE s + ', ' + a END) AS SOURCE,\n       layers                AS LAYERS,\n       people                AS PEOPLE,\n       round(start, 2)       AS START,\n       round(kept, 2)        AS KEPT_BY_PEOPLE,\n       CASE WHEN abs(kept - start) < 0.005 THEN 'OK' ELSE 'MISMATCH' END AS CHECK,\n       skipped               AS NON_P2P_ROWS_LEFT_OUT,\n       round(skipped_amt, 2) AS NON_P2P_AMOUNT\nORDER BY coalesce(toIntegerOrNull(TXN_SL_TAG), 0), TXN_SL_TAG\n",
+          "width": 12,
+          "height": 3,
+          "x": 0,
+          "y": 9,
+          "type": "table",
+          "selection": {},
+          "settings": {
+            "compact": true,
+            "allowDownload": true,
+            "defaultPageSize": 10
+          },
+          "schema": []
+        },
+        {
+          "id": "lyr-layers",
+          "title": "By layer (follows the clicked trail)",
+          "query": "// CARD - \"By layer\" (report type: Table)\n// Per trail and layer, P2P only: what was sent, what of it is traced,\n// the minus, and of the traced money what the people of that layer kept\n// and what they passed on into the next layer.\n// Follows the clicked person's trail; every trail when nothing is clicked.\nWITH coalesce($neodash_lyr_focus, '') AS fk\nOPTIONAL MATCH (f:LNet {key: fk})\nWITH CASE WHEN f IS NULL OR f:LHeader THEN null ELSE f.tag END AS tag\nMATCH (a)-[e:LFLOW]->(b:LNet)\nWHERE tag IS NULL OR e.tag = tag\nWITH e.tag AS t, e.layer AS L, b,\n     sum(e.sent) AS sent, sum(e.amount) AS traced, sum(e.txn_count) AS txns\nWITH t, L, sum(txns) AS txns, count(b) AS people, sum(sent) AS sent, sum(traced) AS traced,\n     sum(b.kept) AS kept, sum(b.traced_out) AS passed_on\nRETURN t AS TXN_SL_TAG, L AS LAYER, people AS PEOPLE, txns AS P2P_TXNS,\n       round(sent, 2)          AS SENT,\n       round(traced, 2)        AS TRACED,\n       round(sent - traced, 2) AS MINUS_NOT_TRACED,\n       round(kept, 2)          AS KEPT,\n       round(passed_on, 2)     AS PASSED_ON\nORDER BY coalesce(toIntegerOrNull(TXN_SL_TAG), 0), TXN_SL_TAG, LAYER\n",
+          "width": 12,
+          "height": 3,
+          "x": 12,
+          "y": 9,
+          "type": "table",
+          "selection": {},
+          "settings": {
+            "compact": true,
+            "allowDownload": true,
+            "defaultPageSize": 10
+          },
+          "schema": []
+        },
+        {
+          "id": "lyr-txns",
+          "title": "P2P transactions on the arrows shown (TRACED_AMT / MINUS_AMT)",
+          "query": "// CARD - \"Transactions\" (report type: Table)\n// The P2P rows on the arrows currently drawn (same rule as\n// cards/graph.cypher), with what the trace counted.\n//   TRACED_AMT - the part of TXN_AMT that carries the layer-1 money\n//   MINUS_AMT  - TXN_AMT - TRACED_AMT (orange in the graph)\nWITH coalesce($neodash_lyr_focus, '') AS fk\nOPTIONAL MATCH (f:LNet {key: fk})\nWITH coalesce(f.chain, []) AS chain\nMATCH (n:LNet)\nWHERE NOT n:LHeader AND (n.parent_key IS NULL OR n.layer = 1 OR n.parent_key IN chain)\nWITH collect(n.key) AS shown\nMATCH (r:LyrTxn {p2p: true})\nWHERE r.to_key IN shown AND r.from_key IN shown\nRETURN r.tag               AS TXN_SL_TAG,\n       r.layer             AS LAYER,\n       r.ts_text           AS APPROVAL_DATETIME,\n       r.txn_id            AS TXN_ID,\n       r.from_acc          AS TXN_FROM,\n       r.with_acc          AS TXN_WITH,\n       r.txn_type          AS TXN_TYPE,\n       r.amount            AS TXN_AMT,\n       round(r.traced, 2)  AS TRACED_AMT,\n       round(r.excess, 2)  AS MINUS_AMT,\n       r.channel           AS CHANNEL,\n       r.post_blc          AS POST_BLC\nORDER BY coalesce(toIntegerOrNull(TXN_SL_TAG), 0), TXN_SL_TAG, LAYER, r.ts\n",
+          "width": 24,
+          "height": 6,
+          "x": 0,
+          "y": 12,
+          "type": "table",
+          "selection": {},
+          "settings": {
+            "compact": true,
+            "allowDownload": true,
+            "defaultPageSize": 25,
+            "description": "TRACED_AMT is the part of TXN_AMT that carries the layer-1 money; MINUS_AMT is the rest (orange in the graph)."
+          },
+          "schema": []
+        }
+      ]
+    }
+  ],
+  "parameters": {
+    "neodash_lyr_focus": ""
+  },
+  "extensions": {
+    "active": true,
+    "activeReducers": [],
+    "actions": {
+      "active": true
+    }
+  }
+}
