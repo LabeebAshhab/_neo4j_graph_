@@ -120,7 +120,7 @@ click 01318971555:                                     (6,080) --6,075--------> 
 | hexagon | wine | source: who sent the layer-1 money |
 | circle | by layer: blue, green, purple, pink, slate | a person who paid others on; click to open them |
 | square | same layer colours | a person who paid nobody on by P2P; the trail ends there |
-| circle / square | **orange** | a person who sent more than they received; beside it, `-Y not traced` |
+| circle / square | **orange** | a person with a minus on either side. Beside it, `got X, -Y not traced` means only part of what they got counts; `sent -Y not traced` means they sent more than they got |
 | box | pale grey | column header (SOURCE, LAYER 1 …) |
 | arrow | grey | fully traced; the caption is the traced amount |
 | arrow | **orange** | part of it is minus; the caption is `traced  (-minus)` |

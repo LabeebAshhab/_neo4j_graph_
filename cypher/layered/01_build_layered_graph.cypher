@@ -39,7 +39,8 @@
 //   inside       = traced amount received
 //   beside       = account number; under it "pays N people", "kept X",
 //                  "-Y not traced"
-//   ORANGE node  = a person who sent more than they received (the minus)
+//   ORANGE node  = a person with a minus: only part of what they got
+//                  counts, or they sent more than they got
 //   arrow        = grey: fully traced; ORANGE: part of it is minus,
 //                  caption "traced  (-minus)"
 //
@@ -281,14 +282,18 @@ SET e.name = apoc.number.format(e.amount, '#,##0.##')
 //        Person - trail ends    square, the same layer colour
 //        Column header          box, pale grey
 //      ORANGE is kept for the minus only: an arrow that carries a minus,
-//      and a person who sent more than they received (shape unchanged).
+//      and a person with a minus on either side - only part of what they
+//      got counts, or they sent more than they got (shape unchanged).
 MATCH (n:LNet)
 WITH n,
      ['#3D6FD1', '#2E9A74', '#8462C8', '#C9558A', '#5F7182', '#2F8FA3', '#8A6D3B'] AS layer_colors,
      [p IN [
         CASE WHEN n.pays > 0 THEN 'pays ' + toString(n.pays) + CASE WHEN n.pays = 1 THEN ' person' ELSE ' people' END END,
         CASE WHEN n:LAccount AND n.kept > 0.005 THEN 'kept ' + apoc.number.format(n.kept, '#,##0.##') END,
-        CASE WHEN n.excess > 0.005 THEN '-' + apoc.number.format(n.excess, '#,##0.##') + ' not traced' END,
+        CASE WHEN n:LAccount AND n.received - n.traced_in > 0.005
+             THEN 'got ' + apoc.number.format(n.received, '#,##0.##') + ', -'
+                  + apoc.number.format(n.received - n.traced_in, '#,##0.##') + ' not traced' END,
+        CASE WHEN n.excess > 0.005 THEN 'sent -' + apoc.number.format(n.excess, '#,##0.##') + ' not traced' END,
         CASE WHEN n.orphan THEN 'no P2P in from layer ' + toString(n.layer - 1) END
       ] WHERE p IS NOT NULL] AS notes
 WITH n, notes,
@@ -309,7 +314,10 @@ WITH n, st, notes,
      CASE WHEN size(st[3]) * 2.5 + 4 > 9 THEN size(st[3]) * 2.5 + 4 ELSE 9.0 END
        + CASE WHEN n:LSource THEN 3 ELSE 0 END AS radius
 SET n.shape      = st[0],
-    n.color      = CASE WHEN n:LAccount AND n.excess > 0.005 THEN '#F08A24' ELSE st[1] END,
+    // orange: a minus on the money in (only part of what they got counts)
+    // or on the money out (they sent more than they got)
+    n.color      = CASE WHEN n:LAccount AND (n.excess > 0.005 OR n.received - n.traced_in > 0.005)
+                        THEN '#F08A24' ELSE st[1] END,
     n.text_color = st[2],
     n.name       = st[3],
     n.role       = st[5],
@@ -335,7 +343,7 @@ UNWIND [
   ['circle',  '#5F7182', '#FFFFFF', 'L5',  'Layer 5 person'],
   ['circle',  '#9AA8B6', '#FFFFFF', 'n',   'Circle - paid others on (click to open)'],
   ['box',     '#9AA8B6', '#FFFFFF', 'n',   'Square - paid nobody on: trail ends'],
-  ['circle',  '#F08A24', '#FFFFFF', '-',   'Orange person - sent more than they received'],
+  ['circle',  '#F08A24', '#FFFFFF', '-',   'Orange circle / square - a minus in or out'],
   ['diamond', '#9AA8B6', null,      'tk',  'Grey arrow - fully traced'],
   ['diamond', '#F08A24', null,      '-',   'Orange arrow (-x) - sent more than came in; x is not counted'],
   ['box',     '#E4E8EC', null,      'LAYER', 'Column header - click to close all']
