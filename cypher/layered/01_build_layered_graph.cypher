@@ -11,7 +11,8 @@
 // :SNet, :SusRow, :Transaction and :Account are never touched.
 //
 // P2P ONLY. Rows whose TXN_TYPE is not P2P (Cash Out, Top Up, Transfer
-// Money to card, ...) are left out of the trace and the graph entirely.
+// Money to card, ...) are left out of the trace and the graph entirely,
+// and so are rows whose STATUS is not SUCCESS (e.g. REVERSED).
 //
 // THE RULE (same as scripts/check_layered_trace.py)
 //   * A layer-1 P2P transfer is traced in full - it is the money followed.
@@ -57,10 +58,16 @@
 // col_gap      - distance between layer columns
 // row_gap      - distance between two leaves of a tree
 // tree_gap     - extra space between two trails
+// layer_colors - one colour per layer, layer 1 first. Any number of
+//                layers works: the trace, the layout, the column headers
+//                and the legend all follow the deepest LAYER in the data.
+//                Past the end of this list the colours start over; add
+//                more here if you need them (never orange - it means minus).
 :param respect_time => true;
 :param col_gap      => 300.0;
 :param row_gap      => 46.0;
 :param tree_gap     => 90.0;
+:param layer_colors => ["#3D6FD1", "#2E9A74", "#8462C8", "#C9558A", "#5F7182", "#2F8FA3", "#8A6D3B", "#5E8C31", "#9C4A4A", "#3A4E8C", "#7A7A2E", "#4A8C8C"];
 
 
 // 2.0  Drop the previous graph and legend; reset the traced figures.
@@ -69,9 +76,12 @@ MATCH (n) WHERE n:LNet OR n:LLegend DETACH DELETE n;
 CREATE INDEX lnet_key IF NOT EXISTS FOR (n:LNet) ON (n.key);
 CALL db.awaitIndexes(300);
 
+// p2p - the row takes part in the trace: a P2P that went through
+//       (STATUS SUCCESS; REVERSED / FAILED rows are left out)
 MATCH (r:LyrTxn)
-SET r.p2p      = toUpper(r.txn_type) = 'P2P',
-    r.traced   = CASE WHEN r.layer = 1 AND toUpper(r.txn_type) = 'P2P' THEN r.amount ELSE null END,
+WITH r, toUpper(r.txn_type) = 'P2P' AND coalesce(r.status, '') IN ['SUCCESS', ''] AS p2p
+SET r.p2p      = p2p,
+    r.traced   = CASE WHEN r.layer = 1 AND p2p THEN r.amount ELSE null END,
     r.excess   = null,
     r.orphan   = false,
     r.from_key = r.tag + '|' + toString(r.layer - 1) + '|' + r.from_acc,
@@ -286,7 +296,7 @@ SET e.name = apoc.number.format(e.amount, '#,##0.##')
 //      got counts, or they sent more than they got (shape unchanged).
 MATCH (n:LNet)
 WITH n,
-     ['#3D6FD1', '#2E9A74', '#8462C8', '#C9558A', '#5F7182', '#2F8FA3', '#8A6D3B'] AS layer_colors,
+     $layer_colors AS layer_colors,
      [p IN [
         CASE WHEN n.pays > 0 THEN 'pays ' + toString(n.pays) + CASE WHEN n.pays = 1 THEN ' person' ELSE ' people' END END,
         CASE WHEN n:LAccount AND n.kept > 0.005 THEN 'kept ' + apoc.number.format(n.kept, '#,##0.##') END,
@@ -334,13 +344,13 @@ SET n.shape      = st[0],
 
 
 // 2.9  The legend card: the same shapes and colours, with what they mean.
-UNWIND [
-  ['hexagon', '#7A1F3D', '#FFFFFF', 'SRC', 'Source - sends the layer-1 money'],
-  ['circle',  '#3D6FD1', '#FFFFFF', 'L1',  'Layer 1 person'],
-  ['circle',  '#2E9A74', '#FFFFFF', 'L2',  'Layer 2 person'],
-  ['circle',  '#8462C8', '#FFFFFF', 'L3',  'Layer 3 person'],
-  ['circle',  '#C9558A', '#FFFFFF', 'L4',  'Layer 4 person'],
-  ['circle',  '#5F7182', '#FFFFFF', 'L5',  'Layer 5 person'],
+//      One row per layer that is actually in the data.
+MATCH (n:LAccount)
+WITH max(n.layer) AS top
+UNWIND [['hexagon', '#7A1F3D', '#FFFFFF', 'SRC', 'Source - sends the layer-1 money']] +
+       [L IN range(1, coalesce(top, 0)) |
+          ['circle', $layer_colors[(L - 1) % size($layer_colors)], '#FFFFFF', 'L' + toString(L),
+           'Layer ' + toString(L) + ' person']] + [
   ['circle',  '#9AA8B6', '#FFFFFF', 'n',   'Circle - paid others on (click to open)'],
   ['box',     '#9AA8B6', '#FFFFFF', 'n',   'Square - paid nobody on: trail ends'],
   ['circle',  '#F08A24', '#FFFFFF', '-',   'Orange circle / square - a minus in or out'],

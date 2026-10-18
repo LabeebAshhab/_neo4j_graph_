@@ -1,8 +1,8 @@
 // CARD - "Does it add up?" (report type: Table)
 // Per trail: the layer-1 P2P amount, and the traced money every person
 // kept after the last layer. KEPT equals START (CHECK = OK) - the
-// "after 5 layers it matches the first transfer" check. The non-P2P
-// rows left out of the trace are counted for reference.
+// "after the last layer it matches the first transfer" check. The rows
+// left out of the trace (not P2P, or not SUCCESS) are counted for reference.
 MATCH (s:LSource)
 WITH s.tag AS tag, collect(s.acc) AS sources, sum(s.sent) AS start
 MATCH (n:LAccount {tag: tag})
@@ -19,6 +19,6 @@ RETURN tag AS TXN_SL_TAG,
        round(start, 2)       AS START,
        round(kept, 2)        AS KEPT_BY_PEOPLE,
        CASE WHEN abs(kept - start) < 0.005 THEN 'OK' ELSE 'MISMATCH' END AS CHECK,
-       skipped               AS NON_P2P_ROWS_LEFT_OUT,
-       round(skipped_amt, 2) AS NON_P2P_AMOUNT
+       skipped               AS ROWS_LEFT_OUT,
+       round(skipped_amt, 2) AS LEFT_OUT_AMOUNT
 ORDER BY coalesce(toIntegerOrNull(TXN_SL_TAG), 0), TXN_SL_TAG

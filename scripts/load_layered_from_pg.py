@@ -69,7 +69,8 @@ SET r.row_no    = row.row_no,
     r.amount    = row.amount,
     r.post_blc  = row.post_blc,
     r.ts_text   = row.ts_text,
-    r.ts        = localdatetime(row.ts)
+    r.ts        = localdatetime(row.ts),
+    r.layered_money = row.layered_money
 """
 
 
@@ -85,6 +86,14 @@ def num(v):
 
 def text(v):
     return '' if v is None else str(v).strip()
+
+
+def account(v):
+    """A mobile/wallet number that lost its leading 0 (Excel turns
+    01912673646 into 1912673646) gets it back, so the same person matches
+    across files. Anything else ("VISA DEBIT CARD", 11 digits) is kept."""
+    s = text(v)
+    return '0' + s if len(s) == 10 and s.isdigit() and s.startswith('1') else s
 
 
 def read_postgres(password):
@@ -112,8 +121,8 @@ def read_postgres(password):
             'txn_id': txn_id,
             'tag': text(r.get('txn_sl_tag')),
             'layer': int(num(r.get('layer'))),
-            'from_acc': text(r.get('txn_from')),
-            'with_acc': text(r.get('txn_with')),
+            'from_acc': account(r.get('txn_from')),
+            'with_acc': account(r.get('txn_with')),
             'with_info': text(r.get('txn_with_info')),
             'txn_type': text(r.get('txn_type')),
             'channel': text(r.get('channel')),
@@ -123,6 +132,9 @@ def read_postgres(password):
             'post_blc': num(r.get('post_blc')),
             'ts': ts_iso,
             'ts_text': ts_iso.replace('T', ' ')[:23],
+            # the sheet's own traced amount, when the file has the column;
+            # shown next to ours in the dashboard, never used in the trace
+            'layered_money': num(r.get('layered_money')),
         })
     return out
 
@@ -203,6 +215,7 @@ def main():
         MATCH (r:LyrTxn)
         RETURN r.tag AS tag, r.layer AS layer, count(*) AS rows,
                sum(CASE WHEN toUpper(r.txn_type) = 'P2P' THEN 1 ELSE 0 END) AS p2p_rows,
+               sum(CASE WHEN r.status <> 'SUCCESS' THEN 1 ELSE 0 END) AS not_success,
                round(sum(r.amount), 2) AS amount
         ORDER BY tag, layer"""))
 

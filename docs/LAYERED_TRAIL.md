@@ -22,7 +22,31 @@ process`, Neo4j is **already running** somewhere else (another window, or
 Neo4j Desktop). Use that one, or close it first. Two copies cannot open the
 same database.
 
-Then:
+### The table in PostgreSQL
+
+`sql/layered/01_layered_table.sql` (pgAdmin Query Tool, database `neo4j`):
+
+* **A**: the table already exists. This adds the `layered_money` column that
+  newer CSVs have (14 columns). Without it, pgAdmin's import fails with *extra
+  data after last expected column*.
+* **B**: a new laptop. This creates the table with all 14 columns.
+* **C**: empty the table, then import the CSV (Import/Export, Header on).
+  Each new CSV holds the whole trail, so replace the rows rather than adding
+  to them.
+
+Every column is text except `APPROVAL_DATETIME`, so nothing in a file can make
+the import fail. Things the loader takes care of:
+
+* **Lost leading zeros:** Excel turns `01912673646` into `1912673646`. The
+  loader puts the 0 back on any 10-digit number starting with 1, so the same
+  person matches across files.
+* **`STATUS` other than SUCCESS** (e.g. `REVERSED`): those rows are left out of
+  the trace.
+* **`LAYERED_MONEY`** (your sheet's own traced amount): never used in the
+  trace. It is shown next to `TRACED_AMT` in the transactions card, with
+  `DIFF`. On `CS_TB_LABEEB_L6.csv` all 53 P2P rows agree (DIFF 0).
+
+### Running
 
 | step | where | what |
 |---|---|---|
@@ -33,6 +57,13 @@ Then:
 Step 1 asks for the PostgreSQL password and the Neo4j password. It reads the
 table, loads it into Neo4j, builds the graph, and prints the check (every trail
 `OK`). Run it again whenever the table changes; it replaces only its own data.
+
+**New layers need no changes.** When the table grows to layer 6, 7 … 10 or
+more, just run step 1 again and refresh NeoDash. Nothing has a fixed number of
+layers: the trace, the layout, the column headers, the colours, the legend and
+every card follow the deepest `LAYER` in the data. The colour list
+(`layer_colors`, at the top of `01_build_layered_graph.cypher`) has 12
+colours; past that they start over. Tested with a made-up 10-layer trail.
 
 The script's defaults are host `localhost:5432`, database `neo4j`, user
 `postgres`, table `public.layered`, and Neo4j at `http://localhost:7474`. To
@@ -150,6 +181,7 @@ the other layers.
 
 | file | what |
 |---|---|
+| `sql/layered/01_layered_table.sql` | the `layered` table in PostgreSQL: add the new column, or create it fresh |
 | `scripts/load_layered_from_pg.py` | PostgreSQL → Neo4j, then builds the graph (**the one you run**) |
 | `cypher/layered/01_build_layered_graph.cypher` | the trace and the graph; the script runs it, or paste it into Neo4j Browser to rebuild from rows already loaded |
 | `cypher/layered/cards/*.cypher` | the query behind each dashboard card |

@@ -3,6 +3,8 @@
 // cards/graph.cypher), with what the trace counted.
 //   TRACED_AMT - the part of TXN_AMT that carries the layer-1 money
 //   MINUS_AMT  - TXN_AMT - TRACED_AMT (orange in the graph)
+//   LAYERED_MONEY / DIFF - the sheet's own figure, when the table has that
+//                column, and TRACED_AMT - LAYERED_MONEY (0 = they agree)
 WITH coalesce($neodash_lyr_focus, '') AS fk
 OPTIONAL MATCH (f:LNet {key: fk})
 WITH coalesce(f.chain, []) AS chain
@@ -21,6 +23,8 @@ RETURN r.tag               AS TXN_SL_TAG,
        r.amount            AS TXN_AMT,
        round(r.traced, 2)  AS TRACED_AMT,
        round(r.excess, 2)  AS MINUS_AMT,
+       r.layered_money     AS LAYERED_MONEY,
+       CASE WHEN r.layered_money IS NULL THEN null ELSE round(r.traced - r.layered_money, 2) END AS DIFF,
        r.channel           AS CHANNEL,
        r.post_blc          AS POST_BLC
 ORDER BY coalesce(toIntegerOrNull(TXN_SL_TAG), 0), TXN_SL_TAG, LAYER, r.ts
