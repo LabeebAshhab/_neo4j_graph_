@@ -39,6 +39,7 @@
 //   inside       = traced amount received
 //   beside       = account number; under it "pays N people", "kept X",
 //                  "-Y not traced"
+//   ORANGE node  = a person who sent more than they received (the minus)
 //   arrow        = grey: fully traced; ORANGE: part of it is minus,
 //                  caption "traced  (-minus)"
 //
@@ -279,7 +280,8 @@ SET e.name = apoc.number.format(e.amount, '#,##0.##')
 //        Person who paid on     circle, one colour per layer, white text
 //        Person - trail ends    square, the same layer colour
 //        Column header          box, pale grey
-//      ORANGE is kept for the minus only (arrows).
+//      ORANGE is kept for the minus only: an arrow that carries a minus,
+//      and a person who sent more than they received (shape unchanged).
 MATCH (n:LNet)
 WITH n,
      ['#3D6FD1', '#2E9A74', '#8462C8', '#C9558A', '#5F7182', '#2F8FA3', '#8A6D3B'] AS layer_colors,
@@ -307,7 +309,7 @@ WITH n, st, notes,
      CASE WHEN size(st[3]) * 2.5 + 4 > 9 THEN size(st[3]) * 2.5 + 4 ELSE 9.0 END
        + CASE WHEN n:LSource THEN 3 ELSE 0 END AS radius
 SET n.shape      = st[0],
-    n.color      = st[1],
+    n.color      = CASE WHEN n:LAccount AND n.excess > 0.005 THEN '#F08A24' ELSE st[1] END,
     n.text_color = st[2],
     n.name       = st[3],
     n.role       = st[5],
@@ -333,6 +335,7 @@ UNWIND [
   ['circle',  '#5F7182', '#FFFFFF', 'L5',  'Layer 5 person'],
   ['circle',  '#9AA8B6', '#FFFFFF', 'n',   'Circle - paid others on (click to open)'],
   ['box',     '#9AA8B6', '#FFFFFF', 'n',   'Square - paid nobody on: trail ends'],
+  ['circle',  '#F08A24', '#FFFFFF', '-',   'Orange person - sent more than they received'],
   ['diamond', '#9AA8B6', null,      'tk',  'Grey arrow - fully traced'],
   ['diamond', '#F08A24', null,      '-',   'Orange arrow (-x) - sent more than came in; x is not counted'],
   ['box',     '#E4E8EC', null,      'LAYER', 'Column header - click to close all']
